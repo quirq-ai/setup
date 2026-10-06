@@ -1,4 +1,6 @@
 @import "tailwindcss";
+/* out/ is the committed build of this page: never scan it for classes, or each build depends on the last. */
+@source not "../out";
 @import "tw-animate-css";
 
 /* Dark follows the viewer: the OS setting unless data-theme on <html> says otherwise. */
