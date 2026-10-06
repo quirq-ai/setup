@@ -1,0 +1,97 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Committed form matches its source (npx runs out/ as committed)
+        run: npm run check-form
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Install Playwright
+        run: npx playwright install --with-deps chromium
+
+      - name: End to end
+        run: npm run e2e
+
+      - name: Upload screenshots
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: screenshots
+          path: test-results/screenshots/
+          if-no-files-found: error
+          retention-days: 30
+
+  # What `npx github:quirq-ai/setup#<commit>` runs: the package with its committed form and no install
+  # scripts, on Linux and macOS, Node 22 and 24.
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+        node: [22, 24]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Pack and run the packed CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          tgz=$(npm pack --silent)
+          tar -tzf "$tgz" > files.txt
+          for f in package/cli/bin.mjs package/out/index.html package/LICENSE; do
+            grep -qx "$f" files.txt || { echo "::error::$f missing from the package"; exit 1; }
+          done
+          if grep -E '^package/(tests|app|components|node_modules)/' files.txt; then
+            echo "::error::the package carries files it should not"; exit 1
+          fi
+          node -e 'const s = require("./package.json").scripts; for (const k of ["preinstall","install","postinstall","prepare","prepack"]) if (s[k]) { console.error(`::error::package.json has a ${k} script; npx from git must run nothing at install`); process.exit(1) }'
+          dir=$(mktemp -d)
+          (cd "$dir" && npm install --silent --ignore-scripts --no-audit --no-fund "$GITHUB_WORKSPACE/$tgz" && npx --no-install qq-setup --version)
