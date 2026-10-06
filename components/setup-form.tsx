@@ -88,7 +88,7 @@ export function SetupForm() {
         <TriangleAlert />
         <AlertTitle>Open this page from your terminal</AlertTitle>
         <AlertDescription>
-          Run <code className="font-mono">npx github:quirq-ai/setup</code> and use the link it prints.
+          Run <code className="font-mono">npx github:quirq-ai/setup#&lt;commit&gt;</code> and use the link it prints.
         </AlertDescription>
       </Alert>
     );
@@ -171,7 +171,9 @@ export function SetupForm() {
       {state && (
         <Card>
           <CardHeader>
-            <CardTitle className="font-display text-lg">1. Your org</CardTitle>
+            <CardTitle>
+              <h2 className="font-display text-lg">1. Your org</h2>
+            </CardTitle>
             <CardDescription>
               Signed in to GitHub as <span className="font-mono">{state.login}</span>. qq needs an org you own.
             </CardDescription>
@@ -180,11 +182,24 @@ export function SetupForm() {
             <RadioGroup value={org} onValueChange={chooseOrg} aria-label="Your org">
               {state.orgs.map((o) => (
                 <div key={o.login} className="flex items-start gap-3">
-                  <RadioGroupItem value={o.login} id={`org-${o.login}`} disabled={!o.usable} className="mt-0.5" />
-                  <Label htmlFor={`org-${o.login}`} className="flex flex-col items-start gap-0.5">
-                    <span className="font-mono">{o.login}</span>
-                    {!o.usable && <span className="font-normal text-muted-foreground">{o.reason}</span>}
-                  </Label>
+                  <RadioGroupItem
+                    value={o.login}
+                    id={`org-${o.login}`}
+                    disabled={!o.usable}
+                    aria-describedby={o.usable ? undefined : `org-${o.login}-why`}
+                    className="mt-0.5"
+                  />
+                  <div className="flex flex-col gap-0.5">
+                    <Label htmlFor={`org-${o.login}`} className="font-mono">
+                      {o.login}
+                    </Label>
+                    {/* Outside the label, so the disabled dimming does not fade the only explanation. */}
+                    {!o.usable && (
+                      <span id={`org-${o.login}-why`} className="text-sm text-muted-foreground">
+                        {o.reason}
+                      </span>
+                    )}
+                  </div>
                 </div>
               ))}
             </RadioGroup>
@@ -195,9 +210,12 @@ export function SetupForm() {
       {org && (
         <Card>
           <CardHeader>
-            <CardTitle className="font-display text-lg">2. Repos to put under qq</CardTitle>
+            <CardTitle>
+              <h2 className="font-display text-lg">2. Repos to put under qq</h2>
+            </CardTitle>
             <CardDescription>
-              Each gets a pull request with its qq manifest and generated workflows, then the merge queue.
+              Setup would open a pull request in each with its qq manifest and generated workflows, then turn
+              on the merge queue.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
@@ -258,8 +276,10 @@ export function SetupForm() {
       {org && list && (
         <Card>
           <CardHeader>
-            <CardTitle className="font-display text-lg">3. A new repo (optional)</CardTitle>
-            <CardDescription>Starts a new public repo from a template, already set up for qq.</CardDescription>
+            <CardTitle>
+              <h2 className="font-display text-lg">3. A new repo (optional)</h2>
+            </CardTitle>
+            <CardDescription>Setup would start a new public repo from a template, already set up for qq.</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
             <div className="flex items-center gap-3">

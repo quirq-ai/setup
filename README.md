@@ -16,7 +16,7 @@ and changes no setting. The version that carries the plan out comes next, after 
 
 ## What it does
 
-1. **Checks** Node 22+, `git`, `gh` (logged in with the `repo` and `read:org` scopes, which
+1. **Checks** Node 22+ (CI tests 22 and 24; qq's own toolchain is Node 24), `git`, `gh` (logged in with the `repo` and `read:org` scopes, which
    `gh auth login` grants) and Python 3.11+ (the setup step will run infra-config's generator and
    gate). It notes that the setup step will also need the `workflow` scope, and how to remove it
    afterwards. It never asks for `admin:org`, `delete_repo` or `gist`. It refuses to run while
@@ -31,6 +31,10 @@ and changes no setting. The version that carries the plan out comes next, after 
 3. **Prints the plan** in the terminal: the config repo it would create, each pull request, each
    ruleset, and what qq does not do for other orgs yet (watching `main`, lkgr, the canary,
    dependency rolls, private repos).
+
+**Over SSH:** run it with `--no-browser --port N` and forward the same port number,
+`ssh -L N:127.0.0.1:N <host>`; then open the printed link on your own machine. The form answers only
+requests addressed to `127.0.0.1:N`, so a forward to a different local port is refused.
 
 Exit codes, as gate and installer use them: 0 done, 1 not ready or stopped (a failed check, no
 answer from the form), 2 error.

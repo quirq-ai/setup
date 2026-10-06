@@ -16,16 +16,18 @@ import { startServer } from "./server.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
-const IDLE_MS = 30 * 60 * 1000;
+const ANSWER_WITHIN_MS = 30 * 60 * 1000;
 
 const HELP = `qq-setup: set up quirq infra (qq) for your GitHub org.
 
-  npx github:quirq-ai/setup [--no-browser]
+  npx github:quirq-ai/setup#<commit> [--no-browser] [--port N]
 
 Checks your tools and gh login, opens a form on 127.0.0.1 where you pick an org and repos,
 then prints the plan here. This version only reads: it changes nothing on GitHub.
 
   --no-browser   print the form's link instead of opening it
+  --port N       serve the form on 127.0.0.1:N (default: a free port). Over SSH, forward the
+                 same port number:  ssh -L N:127.0.0.1:N <host>, then open the printed link
   --version      print the version
   --help         this text`;
 
@@ -34,7 +36,18 @@ const bold = (/** @type {string} */ s) => (process.stdout.isTTY && !process.env.
 async function main(argv = process.argv.slice(2)) {
   const pkg = JSON.parse(await readFile(join(ROOT, "package.json"), "utf8"));
   const known = new Set(["--no-browser", "--version", "--help", "-h"]);
-  const unknown = argv.filter((a) => !known.has(a));
+  let port = 0;
+  /** @type {string[]} */
+  const unknown = [];
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--port") {
+      port = Number(argv[++i]);
+      if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+        console.error("qq-setup: --port needs a number from 1024 to 65535");
+        return 2;
+      }
+    } else if (!known.has(argv[i])) unknown.push(argv[i]);
+  }
   if (unknown.length) {
     console.error(`qq-setup: unknown option ${unknown[0]}\n\n${HELP}`);
     return 2;
@@ -57,7 +70,8 @@ async function main(argv = process.argv.slice(2)) {
   const orgs = await listOrgs();
   if (!orgs.some((o) => o.usable)) {
     console.error(`qq-setup: ${login} owns no GitHub org. qq needs an org (GitHub has no merge queue for personal accounts):`);
-    console.error("create one at https://github.com/account/organizations/new, then run this again.");
+    console.error("create a free one at https://github.com/account/organizations/new, move your repos into it");
+    console.error("(each repo's Settings > General > Transfer ownership), then run this again.");
     return 1;
   }
 
@@ -69,6 +83,7 @@ async function main(argv = process.argv.slice(2)) {
 
   const form = await startServer({
     root: join(ROOT, "out"),
+    port,
     handlers: {
       state: async () => ({ version: pkg.version, readOnly: true, login, orgs }),
       repos: async (org) => {
@@ -82,6 +97,11 @@ async function main(argv = process.argv.slice(2)) {
       submit: async (body) => {
         const checked = checkAnswers(body, orgs, (o) => listed.get(o));
         if (!checked.ok) return checked;
+        // The form only knows the 100 most recently pushed repos: ask GitHub about the new name itself.
+        const st = checked.answers.starter;
+        if (st && (await repoExists(checked.answers.org, st.name))) {
+          return { ok: false, error: `${st.name} already exists in ${checked.answers.org}` };
+        }
         gotAnswers(checked.answers);
         return { ok: true };
       },
@@ -95,8 +115,8 @@ async function main(argv = process.argv.slice(2)) {
   console.log("Waiting for the form. Ctrl-C stops.");
 
   let timer;
-  const idle = new Promise((ok) => (timer = setTimeout(() => ok(null), IDLE_MS)));
-  const answers = await Promise.race([answered, idle]);
+  const timeout = new Promise((ok) => (timer = setTimeout(() => ok(null), ANSWER_WITHIN_MS)));
+  const answers = await Promise.race([answered, timeout]);
   clearTimeout(timer);
   // Let the page receive its "go back to the terminal" answer before the server stops.
   await new Promise((ok) => setTimeout(ok, 300));

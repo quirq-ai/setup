@@ -3,8 +3,8 @@
 // It never touches the network. Any call it does not know fails the way gh does on a 404.
 const args = process.argv.slice(2);
 if (args[0] === "--version") { console.log("gh version 2.89.0 (fake)"); process.exit(0); }
-if (args[0] !== "api" || args[1] !== "--method" || args[2] !== "GET") {
-  console.error(`fake gh: only GET api calls are allowed, got: ${args.join(" ")}`);
+if (args[0] !== "api" || args[1] !== "--hostname" || args[2] !== "github.com" || args[3] !== "--method" || args[4] !== "GET") {
+  console.error(`fake gh: only "api --hostname github.com --method GET" calls are allowed, got: ${args.join(" ")}`);
   process.exit(9);
 }
 const path = args[args.length - 1];
@@ -29,6 +29,8 @@ const routes = {
   "repos/acme-labs/marketing-site/contents/?ref=main": files("package.json", "package-lock.json"),
   "repos/acme-labs/marketing-site/contents/package.json?ref=main": { encoding: "base64", content: b64({ dependencies: { next: "16.3.8" } }) },
   "repos/acme-labs/ios-app/contents/?ref=main": files("Package.swift"),
+  // An old repo past the 100 the form lists: only a direct GET finds it.
+  "repos/acme-labs/old-archive-2019": { name: "old-archive-2019" },
 };
 if (args.includes("--include") && path === "user") {
   process.stdout.write("HTTP/2.0 200 OK\r\nX-Oauth-Scopes: gist, read:org, repo, workflow\r\n\r\n" + JSON.stringify(routes.user));

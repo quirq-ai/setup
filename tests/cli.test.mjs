@@ -31,6 +31,7 @@ test("detectKinds offers a kind only when kinds.toml's stand-in commands will ru
   assert.match(noTypecheck.notes[0], /"typecheck" script/);
   assert.match(detectKinds(["pyproject.toml"]).notes[0], /requirements/);
   assert.equal(detectKinds(["infra"], { hasManifest: true }).onQq, true);
+  assert.match(detectKinds(["package.json"], { packageJson: null }).notes[0], /could not be read/);
 });
 
 test("ghEnv never passes a token variable or a host override to gh", () => {
@@ -80,6 +81,9 @@ test("checkAnswers accepts only what the command offered", () => {
     [{ org: "acme", repos: [], starter: { name: "API", kind: "node-app" } }, /already exists/],
     [{ org: "acme", repos: [], starter: { name: "qq-config", kind: "node-app" } }, /already exists/],
     [{ org: "acme", repos: [], starter: { name: "new", kind: "rust" } }, /offered templates/],
+    // Built-in object keys are not templates (independent review S-1).
+    ...["constructor", "toString", "__proto__", "hasOwnProperty"].map((kind) =>
+      [{ org: "acme", repos: [], starter: { name: "new", kind } }, /offered templates/]),
   ];
   for (const [body, re] of cases) {
     const r = checkAnswers(body, orgs, reposOf);
@@ -93,13 +97,16 @@ test("checkAnswers accepts only what the command offered", () => {
 test("buildPlan names every write, and what v0 leaves out", () => {
   const plan = buildPlan({ org: "acme", repos: ["api", "web"], starter: { name: "new", kind: "node-app" } }, repos, false);
   const text = plan.does.join("\n");
-  assert.match(plan.does[0], /^Create acme\/qq-config/);
+  assert.match(plan.does[1], /^Create acme\/qq-config/);
   assert.match(text, /Create acme\/new \(public\) from the Next\.js 16 app/);
   assert.match(text, /acme\/api \(python-service, pytest\): add infra\/repo\.toml/);
   assert.match(text, /acme\/web \(node-app\): keep its infra\/repo\.toml, add the generated/);
+  assert.match(plan.does[0], /^Before you type yes: read each repo's existing protection/);
+  assert.match(text, /only when its presubmit is green and no review is required; otherwise leave it open/);
+  assert.doesNotMatch(text, /merge it once its presubmit is green/);
   for (const r of ["api", "web", "new"]) assert.match(text, new RegExp(`Protect acme/${r}'s default branch`));
   assert.match(plan.later.join("\n"), /canary/);
-  assert.match(buildPlan({ org: "acme", repos: ["api"], starter: null }, repos, true).does[0], /^Update acme\/qq-config/);
+  assert.match(buildPlan({ org: "acme", repos: ["api"], starter: null }, repos, true).does[1], /^Update acme\/qq-config/);
 });
 
 test("preflight checks: token variables, scopes, Python and macOS", () => {

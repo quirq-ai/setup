@@ -54,7 +54,7 @@ export function checkAnswers(body, orgs, reposOf) {
       return { ok: false, error: "starter needs a name and a kind" };
     }
     if (!isName(s.name)) return { ok: false, error: "starter name: letters, digits, '.', '_' and '-' only" };
-    if (!(s.kind in STARTERS)) return { ok: false, error: "starter kind: pick one of the offered templates" };
+    if (!Object.hasOwn(STARTERS, s.kind)) return { ok: false, error: "starter kind: pick one of the offered templates" };
     const taken = s.name.toLowerCase();
     if (taken === CONFIG_REPO || listed.some((r) => r.name.toLowerCase() === taken)) {
       return { ok: false, error: `${s.name} already exists in ${org.login}` };
@@ -77,6 +77,7 @@ export function buildPlan(a, listed, configExists) {
   const o = a.org;
   /** @type {string[]} */
   const does = [];
+  does.push(`Before you type yes: read each repo's existing protection, rulesets, merge settings and required reviews, and show every warning here`);
   does.push(configExists
     ? `Update ${o}/${CONFIG_REPO}: register the repos below and regenerate their workflows`
     : `Create ${o}/${CONFIG_REPO} (public, Apache-2.0): your qq policy, your repos and their builders`);
@@ -87,10 +88,10 @@ export function buildPlan(a, listed, configExists) {
   for (const name of a.repos) {
     const r = listed.find((x) => x.name === name);
     const kinds = r ? r.kinds.join(", ") : "";
-    does.push(`Open a pull request in ${o}/${name} (${kinds}): ${r?.onQq ? "keep its infra/repo.toml, add" : "add infra/repo.toml and"} the generated qq-${name}-*.yml workflows; merge it once its presubmit is green`);
+    does.push(`Open a pull request in ${o}/${name} (${kinds}): ${r?.onQq ? "keep its infra/repo.toml, add" : "add infra/repo.toml and"} the generated qq-${name}-*.yml workflows. Merge it only when its presubmit is green and no review is required; otherwise leave it open for you and say why`);
   }
   for (const name of names) {
-    does.push(`Protect ${o}/${name}'s default branch with the qq-main ruleset: merge queue, squash only, presubmit required, no bypass`);
+    does.push(`Protect ${o}/${name}'s default branch with the qq-main ruleset (merge queue, squash only, presubmit required, no bypass), only after its pull request merged and never over a warning`);
   }
   does.push(`Read every repo back and print "gated <repo>" only for repos whose ruleset and workflows are in place`);
 

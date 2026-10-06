@@ -81,6 +81,26 @@ for (const scheme of ["light", "dark"] as const) {
   }
 }
 
+test("a starter name taken by a repo the form did not list is refused", async ({ browser }) => {
+  const cli = await startCli();
+  const page = await browser.newPage();
+  try {
+    await page.goto(cli.url);
+    await expect(page.getByRole("radio", { name: /acme-labs/ })).toBeChecked();
+    await page.getByRole("checkbox", { name: "Create a starter repo" }).check();
+    await page.getByLabel("Name").fill("old-archive-2019");
+    await page.getByRole("button", { name: /Show the plan/ }).click();
+    await expect(page.getByText("old-archive-2019 already exists in acme-labs")).toBeVisible();
+    await page.getByLabel("Name").fill("new-app");
+    await page.getByRole("button", { name: /Show the plan/ }).click();
+    await expect(page.getByText("Back to your terminal")).toBeVisible();
+    expect(await cli.exited).toBe(0);
+  } finally {
+    cli.proc.kill();
+    await page.close();
+  }
+});
+
 test("a page without the key gets nothing from the API", async ({ browser }) => {
   const cli = await startCli();
   const page = await browser.newPage();

@@ -42,6 +42,9 @@ export function detectKinds(rootNames, files = {}) {
   }
 
   const pkg = files.packageJson;
+  if (names.has("package.json") && !(pkg && typeof pkg === "object")) {
+    notes.push("package.json could not be read (too large or not valid JSON)");
+  }
   if (pkg && typeof pkg === "object") {
     const deps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
     const scripts = pkg.scripts && typeof pkg.scripts === "object" ? pkg.scripts : {};

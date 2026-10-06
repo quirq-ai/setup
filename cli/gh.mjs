@@ -61,7 +61,7 @@ const PATH_RE = /^[A-Za-z0-9._\/?=&%-]+$/;
  */
 export async function getJson(path) {
   if (!PATH_RE.test(path) || path.includes("..")) throw new GhError(`refusing an unexpected API path: ${path}`);
-  const out = await gh(["api", "--method", "GET", "-H", "Accept: application/vnd.github+json", path]);
+  const out = await gh(["api", "--hostname", "github.com", "--method", "GET", "-H", "Accept: application/vnd.github+json", path]);
   return JSON.parse(out);
 }
 
@@ -90,7 +90,7 @@ export async function getAll(path, maxPages = 5) {
  * @returns {Promise<{ login: string, scopes: string[] | null }>}
  */
 export async function whoami() {
-  const out = await gh(["api", "--method", "GET", "--include", "user"]);
+  const out = await gh(["api", "--hostname", "github.com", "--method", "GET", "--include", "user"]);
   const split = out.indexOf("\r\n\r\n") >= 0 ? out.indexOf("\r\n\r\n") : out.indexOf("\n\n");
   const head = split >= 0 ? out.slice(0, split) : "";
   const body = split >= 0 ? out.slice(split).trim() : out;
