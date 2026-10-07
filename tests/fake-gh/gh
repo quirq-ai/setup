@@ -1,0 +1,51 @@
+#!/usr/bin/env node
+// A stand-in for the GitHub CLI used by the e2e test: canned answers for the GET calls qq-setup makes.
+// It never touches the network. Any call it does not know fails the way gh does on a 404.
+const args = process.argv.slice(2);
+if (args[0] === "--version") { console.log("gh version 2.89.0 (fake)"); process.exit(0); }
+if (args[0] !== "api" || args[1] !== "--hostname" || args[2] !== "github.com" || args[3] !== "--method" || args[4] !== "GET") {
+  console.error(`fake gh: only "api --hostname github.com --method GET" calls are allowed, got: ${args.join(" ")}`);
+  process.exit(9);
+}
+const path = args[args.length - 1];
+const b64 = (o) => Buffer.from(JSON.stringify(o)).toString("base64");
+const repo = (name, extra = {}) => ({ name, visibility: "public", archived: false, fork: false, default_branch: "main", ...extra });
+const files = (...names) => names.map((name) => ({ name, type: "file" }));
+const routes = {
+  "user": { login: "sam-example" },
+  "user/memberships/orgs?state=active&per_page=100&page=1": [
+    { role: "admin", organization: { login: "acme-labs" } },
+    { role: "member", organization: { login: "big-co" } },
+  ],
+  "orgs/acme-labs/repos?type=all&sort=pushed&direction=desc&per_page=100&page=1": [
+    repo("billing-api"), repo("web"), repo("marketing-site"), repo("ios-app"),
+    repo("old-thing", { archived: true }), repo("secret-sauce", { visibility: "private" }), repo("empty"),
+  ],
+  "repos/acme-labs/billing-api/contents/?ref=main": [...files("requirements.txt", "requirements-dev.txt", "app.py"), { name: "tests", type: "dir" }],
+  "repos/acme-labs/billing-api/contents/requirements-dev.txt?ref=main": { encoding: "base64", content: Buffer.from("-r requirements.txt\npytest==8.4.2\n").toString("base64") },
+  "repos/acme-labs/web/contents/?ref=main": [...files("package.json", "pnpm-lock.yaml"), { name: "infra", type: "dir" }],
+  "repos/acme-labs/web/contents/package.json?ref=main": { encoding: "base64", content: b64({ dependencies: { next: "16.3.8" }, scripts: { build: "next build", typecheck: "tsc --noEmit" } }) },
+  "repos/acme-labs/web/contents/infra/repo.toml?ref=main": { name: "repo.toml" },
+  "repos/acme-labs/marketing-site/contents/?ref=main": files("package.json", "package-lock.json"),
+  "repos/acme-labs/marketing-site/contents/package.json?ref=main": { encoding: "base64", content: b64({ dependencies: { next: "16.3.8" } }) },
+  "repos/acme-labs/ios-app/contents/?ref=main": files("Package.swift"),
+  // What already guards the repos the e2e test picks: web has old protection; billing-api's protection
+  // answers a plain 404 (as GitHub does for a non-admin), which must read as "could not read".
+  "repos/acme-labs/billing-api": repo("billing-api", { allow_squash_merge: true }),
+  "repos/acme-labs/billing-api/rulesets?includes_parents=true": [],
+  "repos/acme-labs/web": repo("web", { allow_squash_merge: true }),
+  "repos/acme-labs/web/rulesets?includes_parents=true": [{ id: 7, name: "release-freeze" }],
+  "repos/acme-labs/web/branches/main/protection": {
+    required_status_checks: { contexts: ["ci/build"], checks: [{ context: "ci/build" }] },
+    required_pull_request_reviews: { required_approving_review_count: 1 },
+  },
+  // An old repo past the 100 the form lists: only a direct GET finds it.
+  "repos/acme-labs/old-archive-2019": { name: "old-archive-2019" },
+};
+if (args.includes("--include") && path === "user") {
+  process.stdout.write("HTTP/2.0 200 OK\r\nX-Oauth-Scopes: gist, read:org, repo, workflow\r\n\r\n" + JSON.stringify(routes.user));
+  process.exit(0);
+}
+if (path in routes) { process.stdout.write(JSON.stringify(routes[path])); process.exit(0); }
+console.error(`gh: Not Found (HTTP 404)`);
+process.exit(1);
