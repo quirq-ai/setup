@@ -115,7 +115,7 @@ test("a page without the key gets nothing from the API", async ({ browser }) => 
     const bare = cli.url.replace(/#.*/, "");
     await page.goto(bare);
     await expect(page.getByText("Open this page from your terminal")).toBeVisible();
-    await expect(page.getByText("npx --allow-git=root github:quirq-ai/setup#<commit>")).toBeVisible();
+    await expect(page.getByText("npx --allow-remote=root https://codeload.github.com/quirq-ai/setup/tar.gz/<commit>")).toBeVisible();
     const res = await page.request.get(`${bare}api/state`);
     expect(res.status()).toBe(403);
     expect(await res.text()).not.toContain("acme-labs");

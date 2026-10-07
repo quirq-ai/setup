@@ -22,10 +22,10 @@ const IDLE_MS = 30 * 60 * 1000;
 
 const HELP = `qq-setup: set up quirq infra (qq) for your GitHub org.
 
-  npx --allow-git=root github:quirq-ai/setup#<commit> [--no-browser] [--port N]
+  npx --allow-remote=root https://codeload.github.com/quirq-ai/setup/tar.gz/<commit> [--no-browser] [--port N]
 
-<commit> is the latest commit on https://github.com/quirq-ai/setup/commits/main. npm 12 runs
-packages from git only with --allow-git=root.
+<commit> is the full id of the latest commit on https://github.com/quirq-ai/setup/commits/main.
+npm 12 runs a package from a tarball link only with --allow-remote=root.
 
 Checks your tools and gh login, opens a form on 127.0.0.1 where you pick an org and repos,
 then prints the plan here. This version only reads: it changes nothing on GitHub.

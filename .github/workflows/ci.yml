@@ -54,8 +54,9 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  # What `npx --allow-git=root github:quirq-ai/setup#<commit>` runs: the package with its committed form and no install
-  # scripts, on Linux and macOS, Node 22 and 24.
+  # The package on Linux and macOS, Node 22 (npm 10) and 24: no install scripts, no dependencies, and the
+  # README's tarball-link command run the way users run it. A tarball link installs the whole git
+  # archive; the pack step's file list guards only a future npm publish.
   package:
     strategy:
       fail-fast: false
@@ -94,20 +95,31 @@ jobs:
           if grep -E '^package/(tests|app|components|node_modules)/' files.txt; then
             echo "::error::the package carries files it should not"; exit 1
           fi
-          node -e 'const s = require("./package.json").scripts; for (const k of ["preinstall","install","postinstall","prepare","prepack"]) if (s[k]) { console.error(`::error::package.json has a ${k} script; npx from git must run nothing at install`); process.exit(1) }'
+          node -e 'const s = require("./package.json").scripts; for (const k of ["preinstall","install","postinstall","prepare","prepack"]) if (s[k]) { console.error(`::error::package.json has a ${k} script; npx must run nothing at install`); process.exit(1) }'
+          # --allow-remote=root is harmless only because nothing else is fetched: no dependencies at all.
+          node -e 'const p = require("./package.json"); for (const k of ["dependencies","optionalDependencies","peerDependencies","bundleDependencies","bundledDependencies"]) { const v = p[k]; if (v && (Array.isArray(v) ? v.length : Object.keys(v).length)) { console.error(`::error::package.json has ${k}; the npx command must fetch nothing but this package`); process.exit(1) } }'
           dir=$(mktemp -d)
           (cd "$dir" && npm install --silent --ignore-scripts --no-audit --no-fund "$GITHUB_WORKSPACE/$tgz" && npx --no-install qq-setup --version)
 
-      # npm 12 refuses git sources unless --allow-git=root is passed; one cell runs it on npm 12.
+      # npm 12 refuses tarball links unless --allow-remote=root is passed; one cell runs it on npm 12.
       - name: Use npm 12
         if: ${{ matrix.os == 'ubuntu-24.04' && matrix.node == 24 }}
         run: npm install --global npm@12
 
-      - name: Run the CLI from git, as the README says
+      # The README's command fetches GitHub's tarball of a commit (git archive with a setup-<sha>/
+      # prefix) over HTTP. Serve the same archive locally and run it the same way.
+      - name: Run the CLI from a tarball link, as the README says
         shell: bash
         run: |
           set -euo pipefail
           npm --version
           sha=$(git rev-parse HEAD)
+          www=$(mktemp -d)
+          git archive --format=tar.gz --prefix="setup-$sha/" -o "$www/$sha" HEAD
+          python3 -m http.server 8731 --bind 127.0.0.1 --directory "$www" >/dev/null 2>&1 &
+          trap 'kill $!' EXIT
+          up=
+          for _ in 1 2 3 4 5 6 7 8 9 10; do curl -sf -o /dev/null "http://127.0.0.1:8731/$sha" && { up=1; break; }; sleep 1; done
+          [ -n "$up" ] || { echo "::error::the local tarball server did not start"; exit 1; }
           dir=$(mktemp -d)
-          (cd "$dir" && npx --yes --allow-git=root "git+file://$GITHUB_WORKSPACE#$sha" --version)
+          (cd "$dir" && npx --yes --allow-remote=root "http://127.0.0.1:8731/$sha" --version)

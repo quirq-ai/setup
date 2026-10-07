@@ -88,7 +88,7 @@ export function SetupForm() {
         <TriangleAlert />
         <AlertTitle>Open this page from your terminal</AlertTitle>
         <AlertDescription>
-          Run <code className="font-mono break-all">npx --allow-git=root github:quirq-ai/setup#&lt;commit&gt;</code> and
+          Run <code className="font-mono break-all">npx --allow-remote=root https://codeload.github.com/quirq-ai/setup/tar.gz/&lt;commit&gt;</code> and
           use the link it prints.
         </AlertDescription>
       </Alert>
