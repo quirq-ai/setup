@@ -9,11 +9,12 @@ npx --allow-remote=root https://codeload.github.com/quirq-ai/setup/tar.gz/<commi
 
 `<commit>` is the full id of the latest commit on
 [`main`](https://github.com/quirq-ai/setup/commits/main). Always pin it: the link then serves
-exactly that commit, and nothing that lands on `main` later. npx downloads it as a tarball rather
-than through git, because npm 10's npx cannot run a package from a `github:` link ("GitFetcher
-requires an Arborist constructor"). `--allow-remote=root` lets npm run a package from a tarball
-link: npm 12 refuses one without it, and npm 10 and 11 ignore the flag, which is harmless here
-because the package has no dependencies.
+exactly that commit, and nothing that lands on `main` later. npx downloads it as a tarball, not
+through git: npm 10's npx cannot run a `github:` link pinned to a commit ("GitFetcher requires an
+Arborist constructor"). `--allow-remote=root` lets npm run a package from a tarball link. npm 12
+refuses one without it. npm 11.14 and later honour the flag, though by default they already allow
+tarball links. npm 10 ignores it. Either way it is harmless here, because the package has no
+dependencies.
 
 **This version only reads.** It shows the plan and stops: it creates no repo, opens no pull request
 and changes no setting. The version that carries the plan out comes next, after review.

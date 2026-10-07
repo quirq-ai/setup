@@ -6,7 +6,7 @@ const nextConfig: NextConfig = {
   output: "export",
   images: { unoptimized: true },
   poweredByHeader: false,
-  // out/ is committed (npx from git must not build), so the same source must give the same bytes.
+  // out/ is committed (npx runs the package as downloaded and must not build), so the same source must give the same bytes.
   generateBuildId: async () => "qq-setup",
 };
 
