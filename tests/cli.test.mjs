@@ -7,10 +7,10 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { detectKinds } from "../cli/detect.mjs";
-import { encodeRef, ghEnv, isName } from "../cli/gh.mjs";
+import { encodeRef, ghEnv, GhError, isName } from "../cli/gh.mjs";
 import { buildPlan, checkAnswers } from "../cli/plan.mjs";
 import { checks } from "../cli/preflight.mjs";
-import { protectionWarnings } from "../cli/protection.mjs";
+import { classicFromError, protectionWarnings } from "../cli/protection.mjs";
 import { startServer } from "../cli/server.mjs";
 
 test("detectKinds offers a kind only when kinds.toml's stand-in commands will run", () => {
@@ -230,6 +230,12 @@ test("protectionWarnings: clean, unknown never reads as clean, and classic prote
   assert.match(unknown.join("\n"), /could not read the merge settings/);
   assert.match(unknown.join("\n"), /could not read its rulesets/);
   assert.match(unknown.join("\n"), /could not read main's branch protection/);
+
+  // Only GitHub's "Branch not protected" 404 means none; a plain 404 or a 403 is unreadable.
+  assert.equal(classicFromError(new GhError("gh api failed: gh: Branch not protected (HTTP 404)", 404)), "none");
+  assert.equal(classicFromError(new GhError("gh api failed: gh: Not Found (HTTP 404)", 404)), "unreadable");
+  assert.equal(classicFromError(new GhError("gh api failed: gh: Must have admin rights to Repository. (HTTP 403)", 403)), "unreadable");
+  assert.equal(classicFromError(new Error("timeout")), "unreadable");
 
   const legacy = protectionWarnings("trunk", {
     squash: false, rulesets: ["release-freeze", "qq-main"], classic: { checks: ["build", "lint"], reviews: 2 } });

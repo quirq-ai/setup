@@ -29,7 +29,8 @@ const routes = {
   "repos/acme-labs/marketing-site/contents/?ref=main": files("package.json", "package-lock.json"),
   "repos/acme-labs/marketing-site/contents/package.json?ref=main": { encoding: "base64", content: b64({ dependencies: { next: "16.3.8" } }) },
   "repos/acme-labs/ios-app/contents/?ref=main": files("Package.swift"),
-  // What already guards the repos the e2e test picks: billing-api has nothing, web has old protection.
+  // What already guards the repos the e2e test picks: web has old protection; billing-api's protection
+  // answers a plain 404 (as GitHub does for a non-admin), which must read as "could not read".
   "repos/acme-labs/billing-api": repo("billing-api", { allow_squash_merge: true }),
   "repos/acme-labs/billing-api/rulesets?includes_parents=true": [],
   "repos/acme-labs/web": repo("web", { allow_squash_merge: true }),

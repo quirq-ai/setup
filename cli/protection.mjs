@@ -40,10 +40,20 @@ export async function readProtection(org, repo, branch) {
     ].filter((x) => typeof x === "string");
     p.classic = { checks: [...new Set(checks)], reviews: Number(c?.required_pull_request_reviews?.required_approving_review_count ?? 0) };
   } catch (e) {
-    // 404 "Branch not protected" means none; 403 means the reader is not a repo admin.
-    p.classic = e instanceof GhError && e.status === 404 ? "none" : "unreadable";
+    p.classic = classicFromError(e);
   }
   return p;
+}
+
+/**
+ * Pure: what a failed protection read means. Only a 404 saying "Branch not protected" means none; a
+ * plain "Not Found" (GitHub's answer to a non-admin, or to a branch name it rejects) and a 403 mean
+ * the reader could not see it.
+ * @param {unknown} e
+ * @returns {"none" | "unreadable"}
+ */
+export function classicFromError(e) {
+  return e instanceof GhError && e.status === 404 && /Branch not protected/i.test(e.message) ? "none" : "unreadable";
 }
 
 /**

@@ -73,7 +73,8 @@ for (const scheme of ["light", "dark"] as const) {
         expect(out).toContain("Plan for acme-labs");
         expect(out).toContain("Create acme-labs/new-app (public)");
         expect(out).toContain("Open a pull request in acme-labs/billing-api");
-        expect(out).toContain("billing-api: no existing protection found");
+        expect(out).toContain("billing-api: warning: could not read main's branch protection");
+        expect(out).not.toContain("billing-api: no existing protection found");
         expect(out).toContain("web: warning: other rulesets apply (release-freeze)");
         expect(out).toContain("web: warning: its required checks (ci/build) must also run on merge_group");
         expect(out).toContain("web: warning: it requires 1 approving review: setup would leave its pull request open for you");
