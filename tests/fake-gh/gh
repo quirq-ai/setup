@@ -39,6 +39,9 @@ const routes = {
     required_status_checks: { contexts: ["ci/build"], checks: [{ context: "ci/build" }] },
     required_pull_request_reviews: { required_approving_review_count: 1 },
   },
+  // quirq-ai's own tool repos are named, not inspected: no contents route exists for gate.
+  "orgs/quirq-ai/repos?type=all&sort=pushed&direction=desc&per_page=100&page=1": [repo("gate"), repo("Gate-notes"), repo("ios-app")],
+  "repos/quirq-ai/ios-app/contents/?ref=main": files("Package.swift"),
   // An old repo past the 100 the form lists: only a direct GET finds it.
   "repos/acme-labs/old-archive-2019": { name: "old-archive-2019" },
 };

@@ -5,6 +5,13 @@
 import { detectKinds } from "./detect.mjs";
 import { encodeRef, getAll, getJson, isName, GhError } from "./gh.mjs";
 
+/**
+ * qq's own repos in quirq-ai: the tools qq is made of (infra-config's 13 infra repos) and this
+ * command. They run qq's CI already, so setup never offers them.
+ */
+export const QQ_OWN_REPOS = new Set(["depot", "sync", "recipes", "infra-config", "test-pipelines", "gate",
+  "toolchains", "remote-build", "gardener", "rollers", "release", "installer", "perf", "setup"]);
+
 /** At most this many repos per org are checked, newest push first. */
 export const MAX_REPOS = 100;
 
@@ -65,6 +72,9 @@ async function describeRepo(org, r) {
     fork: Boolean(r.fork),
     defaultBranch: String(r.default_branch ?? "main"),
   };
+  if (org.toLowerCase() === "quirq-ai" && QQ_OWN_REPOS.has(base.name)) {
+    return { ...base, kinds: [], onQq: true, usable: false, reason: "part of qq itself: it already runs qq's own CI", notes: [] };
+  }
   if (base.archived) return { ...base, kinds: [], onQq: false, usable: false, reason: "archived", notes: [] };
   if (base.visibility !== "public") {
     return { ...base, kinds: [], onQq: false, usable: false, notes: [],

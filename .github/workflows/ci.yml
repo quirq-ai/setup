@@ -119,7 +119,7 @@ jobs:
           python3 -m http.server 8731 --bind 127.0.0.1 --directory "$www" >/dev/null 2>&1 &
           trap 'kill $!' EXIT
           up=
-          for _ in 1 2 3 4 5 6 7 8 9 10; do curl -sf -o /dev/null "http://127.0.0.1:8731/$sha" && { up=1; break; }; sleep 1; done
+          for _ in 1 2 3 4 5 6 7 8 9 10; do curl -sf --max-time 2 -o /dev/null "http://127.0.0.1:8731/$sha" && { up=1; break; }; sleep 1; done
           [ -n "$up" ] || { echo "::error::the local tarball server did not start"; exit 1; }
           dir=$(mktemp -d)
           (cd "$dir" && npx --yes --allow-remote=root "http://127.0.0.1:8731/$sha" --version)

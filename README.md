@@ -13,7 +13,7 @@ exactly that commit, and nothing that lands on `main` later. npx downloads it as
 through git: npm 10's npx cannot run a `github:` link pinned to a commit ("GitFetcher requires an
 Arborist constructor"). `--allow-remote=root` lets npm run a package from a tarball link. npm 12
 refuses one without it. npm 11.14 and later honour the flag, though by default they already allow
-tarball links. npm 10 ignores it. Either way it is harmless here, because the package has no
+tarball links. npm 10 and npm 11.0 to 11.13 ignore it. Either way it is harmless here, because the package has no
 dependencies.
 
 **This version only reads.** It shows the plan and stops: it creates no repo, opens no pull request

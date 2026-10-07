@@ -3,13 +3,15 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
 import { detectKinds } from "../cli/detect.mjs";
 import { encodeRef, ghEnv, GhError, isName } from "../cli/gh.mjs";
 import { buildPlan, checkAnswers } from "../cli/plan.mjs";
 import { checks } from "../cli/preflight.mjs";
+import { listRepos } from "../cli/facts.mjs";
 import { classicFromError, protectionWarnings } from "../cli/protection.mjs";
 import { startServer } from "../cli/server.mjs";
 
@@ -24,6 +26,10 @@ test("detectKinds offers a kind only when kinds.toml's stand-in commands will ru
   assert.deepEqual(detectKinds(["package.json", "pnpm-lock.yaml"], { packageJson: next }).kinds, ["node-app"]);
   assert.deepEqual(detectKinds(["package.json", "pnpm-lock.yaml"],
     { packageJson: { dependencies: { gatsby: "4" }, scripts: { build: "gatsby build", test: "node --test" } } }).kinds, ["gatsby-site"]);
+
+  const nothing = detectKinds(["Package.swift", "README.md"]);
+  assert.deepEqual(nothing.kinds, []);
+  assert.match(nothing.notes[0], /^no requirements\.txt, requirements-dev\.txt or package\.json at the root/);
 
   const noPytest = detectKinds(["requirements-dev.txt"], { requirementsDev: "ruff\n# pytest later\n" });
   assert.deepEqual(noPytest.kinds, []);
@@ -244,4 +250,20 @@ test("protectionWarnings: clean, unknown never reads as clean, and classic prote
   assert.match(legacy[2], /^trunk has classic branch protection/);
   assert.match(legacy[3], /\(build, lint\) must also run on merge_group/);
   assert.match(legacy[4], /requires 2 approving reviews: setup would leave its pull request open/);
+});
+
+test("listRepos: quirq-ai's own tool repos are named as part of qq, and an empty reason is explained", async () => {
+  const fakeGh = fileURLToPath(new URL("./fake-gh", import.meta.url));
+  const saved = process.env.PATH;
+  process.env.PATH = `${fakeGh}${delimiter}${saved}`;
+  try {
+    const { repos } = await listRepos("quirq-ai");
+    const by = Object.fromEntries(repos.map((r) => [r.name, r]));
+    assert.equal(by.gate.usable, false);
+    assert.match(by.gate.reason ?? "", /^part of qq itself/);
+    assert.equal(by["Gate-notes"].reason, "empty repo"); // only the exact tool names, never a lookalike
+    assert.match(by["ios-app"].notes[0], /^no requirements\.txt/);
+  } finally {
+    process.env.PATH = saved;
+  }
 });
