@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // @ts-check
-// qq-setup: set up quirq infra (qq) for a GitHub org. The terminal checks your tools, a local form
-// in your browser asks which org and repos, and the terminal shows the plan.
+// qq-setup: set up quirq infra (qq) for a GitHub org, or put qq on this machine to work on a repo that
+// already uses it. The terminal checks your tools, a local form in your browser asks which, and the
+// terminal shows the plan or prints the install commands.
 // THIS BUILD IS READ-ONLY: it reads GitHub through your gh login and writes nothing anywhere.
 
 import { execFile } from "node:child_process";
@@ -14,21 +15,24 @@ import { buildPlan, checkAnswers, CONFIG_REPO } from "./plan.mjs";
 import { preflight } from "./preflight.mjs";
 import { protectionWarnings, readProtection } from "./protection.mjs";
 import { startServer } from "./server.mjs";
+import { ACCESS, checkTools, INSTALL, MAC, NEEDS, toolsText, commandsFor } from "./tools.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
 // The form gives up after 30 minutes with no request from the page.
 const IDLE_MS = 30 * 60 * 1000;
 
-const HELP = `qq-setup: set up quirq infra (qq) for your GitHub org.
+const HELP = `qq-setup: set up quirq infra (qq) for your GitHub org, or install qq to work on a repo that uses it.
 
   npx --allow-remote=root https://codeload.github.com/quirq-ai/setup/tar.gz/<commit> [--no-browser] [--port N]
 
 <commit> is the full id of the latest commit on https://github.com/quirq-ai/setup/commits/main.
 npm 12 runs a package from a tarball link only with --allow-remote=root.
 
-Checks your tools and gh login, opens a form on 127.0.0.1 where you pick an org and repos,
-then prints the plan here. This version only reads: it changes nothing on GitHub.
+Checks your tools and gh login, then opens a form on 127.0.0.1 with two choices:
+  - set up repos in an org you own: pick the org and repos, and the plan prints here;
+  - work on a repo that already uses qq: the commands that install qq print here.
+This version only reads: it changes nothing on GitHub and installs nothing.
 
   --no-browser   print the form's link instead of opening it
   --port N       serve the form on 127.0.0.1:N (default: a free port). Over SSH, forward the
@@ -60,7 +64,7 @@ async function main(argv = process.argv.slice(2)) {
   if (argv.includes("--help") || argv.includes("-h")) return console.log(HELP), 0;
   if (argv.includes("--version")) return console.log(`qq-setup ${pkg.version}`), 0;
 
-  console.log(`${bold("qq-setup")} ${pkg.version}: sets up quirq infra (qq) for a GitHub org.`);
+  console.log(`${bold("qq-setup")} ${pkg.version}: sets up quirq infra (qq) for a GitHub org, or shows how to install qq.`);
   console.log("This version only reads from GitHub. Nothing is created or changed.\n");
 
   const results = await preflight();
@@ -74,15 +78,14 @@ async function main(argv = process.argv.slice(2)) {
   console.log("\nReading your GitHub orgs...");
   const orgs = await listOrgs();
   if (!orgs.some((o) => o.usable)) {
-    console.error(`qq-setup: ${login} owns no GitHub org. qq needs an org (GitHub has no merge queue for personal accounts):`);
-    console.error("create a free one at https://github.com/account/organizations/new, move your repos into it");
-    console.error("(each repo's Settings > General > Transfer ownership), then run this again.");
-    return 1;
+    console.log(`  note  ${login} owns no GitHub org, so the form can only show how to install qq. To set up repos,`);
+    console.log("        create a free org at https://github.com/account/organizations/new, move your repos into it");
+    console.log("        (each repo's Settings > General > Transfer ownership), then run this again.");
   }
 
   /** @type {Map<string, import("./facts.mjs").Repo[]>} */
   const listed = new Map();
-  /** @type {(v: import("./plan.mjs").Answers) => void} */
+  /** @type {(v: import("./plan.mjs").Answers | { tools: string | null }) => void} */
   let gotAnswers = () => {};
   const answered = new Promise((ok) => (gotAnswers = ok));
   let accepted = false;
@@ -100,7 +103,8 @@ async function main(argv = process.argv.slice(2)) {
     root: join(ROOT, "out"),
     port,
     handlers: {
-      state: async () => (touch(), { version: pkg.version, readOnly: true, login, orgs }),
+      state: async () => (touch(), { version: pkg.version, readOnly: true, login, orgs, platform: process.platform,
+        tools: { install: INSTALL, ...commandsFor(process.platform), needs: NEEDS, mac: MAC, access: ACCESS } }),
       repos: async (org) => {
         touch();
         const o = orgs.find((x) => x.login === org);
@@ -113,6 +117,13 @@ async function main(argv = process.argv.slice(2)) {
       submit: async (body) => {
         touch();
         if (accepted) return { ok: false, status: 409, error: "already answered: the terminal has your first answers" };
+        if (body && typeof body === "object" && "mode" in body) {
+          const t = checkTools(body);
+          if (!t.ok) return t;
+          accepted = true;
+          gotAnswers({ tools: t.repo });
+          return { ok: true };
+        }
         const checked = checkAnswers(body, orgs, (o) => listed.get(o));
         if (!checked.ok) return checked;
         // The form only knows the 100 most recently pushed repos: ask GitHub about the new name itself.
@@ -145,7 +156,13 @@ async function main(argv = process.argv.slice(2)) {
     return 1;
   }
 
-  const a = /** @type {import("./plan.mjs").Answers} */ (answers);
+  if ("tools" in answers) {
+    console.log("");
+    for (const line of toolsText(answers.tools, process.platform)) console.log(line);
+    console.log(`\n${bold("Nothing was installed.")} qq-setup only printed the commands; run them yourself.`);
+    return 0;
+  }
+  const a = answers;
   const repos = listed.get(a.org) ?? [];
   if (a.repos.length) {
     console.log(`\n${bold("What already guards these repos")} (read only; setup would check again before writing):`);

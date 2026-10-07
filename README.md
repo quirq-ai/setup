@@ -1,7 +1,8 @@
 # qq-setup
 
-One command to set up quirq infra (qq) for your GitHub org: the terminal checks your tools, a short
-form in your browser asks which org and repos, and the terminal shows what it will do.
+One command to set up quirq infra (qq) for your GitHub org, or to put qq on your machine and work on
+a repo that already uses it: the terminal checks your tools, a short form in your browser asks
+which, and the terminal shows what it will do or prints the commands.
 
 ```sh
 npx --allow-remote=root https://codeload.github.com/quirq-ai/setup/tar.gz/<commit>
@@ -16,8 +17,8 @@ refuses one without it. npm 11.14 and later honour the flag, though by default t
 tarball links. npm 10 and npm 11.0 to 11.13 ignore it. Either way it is harmless here, because the package has no
 dependencies.
 
-**This version only reads.** It shows the plan and stops: it creates no repo, opens no pull request
-and changes no setting. The version that carries the plan out comes next, after review.
+**This version only reads.** It shows the plan or prints commands and stops: it creates no repo,
+opens no pull request, changes no setting and installs nothing. The version that carries the plan out comes next, after review.
 
 ## What it does
 
@@ -27,7 +28,13 @@ and changes no setting. The version that carries the plan out comes next, after 
    afterwards. It never asks for `admin:org`, `delete_repo` or `gist`. It refuses to run while
    `GH_TOKEN` or `GITHUB_TOKEN` is set, so it only ever acts as your own `gh` login.
 2. **Opens a form** on `127.0.0.1` (link printed in the terminal; `--no-browser` only prints it).
-   You pick an org you own, the repos to put under qq and, optionally, a new starter repo.
+   It asks what you want to do:
+   - **Install qq on my machine and work on a repo.** The terminal prints the three commands from the
+     [qq guide](https://docs.quirq.dev/docs/qq) that install `qq` and `qqsync` and put them on your
+     `PATH`, then `qq fetch https://github.com/<owner>/<name>` for the repo you name (`git clone` on a Mac),
+     and what `qq sync`, `qq build`, `qq test` and `qq run` do. It runs none of them. To push
+     branches to the repo, an owner gives you Write access. A login that owns no org starts here.
+   - **Set up repos in an org I own** (steps 3 and 4). You pick an org you own, the repos to put under qq and, optionally, a new starter repo.
    A repo is offered only when it can run its qq kind's commands as they are: Python service
    (`requirements.txt`), pytest (`requirements-dev.txt` listing pytest), Next.js app (pnpm with
    `build` and `typecheck` scripts) or Gatsby site (pnpm with `build` and `test` scripts). Others
@@ -56,15 +63,19 @@ request from the form for 30 minutes), 2 error. Ctrl-C stops it by signal, which
 - The form server listens on `127.0.0.1` only, answers only requests whose `Host` is exactly that
   address (no DNS rebinding), and answers `/api/*` only with the one-time key from the printed link.
   The key is in the link's `#fragment`, which browsers never send to a server.
-- The page receives only names the command already read (orgs, repos, kinds), never a token. Its
-  answers are checked against those names before the terminal uses them.
+- The page receives only names the command already read (orgs, repos, kinds), your platform name
+  and the fixed text of the install path, never a token. Its answers are checked against those
+  names before the terminal uses them.
 - No telemetry. The page loads nothing from the internet (no web fonts, strict CSP).
 
 ## On a Mac
 
 It works the same. macOS ships Python 3.9, so the later setup step needs a newer one
-(`brew install python@3.14`). After setup, `qq build` and `qq test` stay Linux-only, as qq's
-toolchains are; CI runs on GitHub's Linux runners.
+(`brew install python@3.14`), as does installing qq. qq fetches toolchains for Linux x86_64 only, so
+on a Mac `qq fetch` and `qq sync` stop with "no pin for platform": the form and terminal show
+`git clone` instead of `qq fetch` there and leave out `qq sync`, `qq build`, `qq test` and `qq run`,
+which need Linux x86_64 for now; you use a repo's pinned tools yourself (`qqsync show
+infra/repo.toml` lists them). CI runs on GitHub's Linux runners.
 
 ## Develop
 

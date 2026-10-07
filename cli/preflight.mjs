@@ -4,6 +4,7 @@
 
 import { execFile } from "node:child_process";
 import { TOKEN_VARS, whoami } from "./gh.mjs";
+import { MAC } from "./tools.mjs";
 
 /** What this read-only build needs: `gh auth login` grants both (with gist, which setup never uses). */
 export const NEEDED_SCOPES = ["repo", "read:org"];
@@ -70,7 +71,7 @@ export function checks(seen) {
 
   if (seen.platform === "darwin") {
     out.push({ name: "macOS", ok: true, fatal: false,
-      detail: "setup works here; afterwards, qq build and qq test run on Linux only (CI runs on Linux)" });
+      detail: `setup works here. ${MAC}` });
   } else if (seen.platform === "win32") {
     out.push({ name: "Windows", ok: false, fatal: false, detail: "not tested on Windows; use WSL if anything fails" });
   }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { CircleCheck, TriangleAlert } from "lucide-react";
+import { Check, CircleCheck, Copy, TriangleAlert } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,9 +20,21 @@ import {
   type RepoList,
   type StarterKind,
   type State,
+  type Tools,
 } from "@/lib/api";
 
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
+
+type Mode = "repos" | "tools";
+
+// As cli/tools.mjs normalizeRepo and isName: owner/name, a pasted github.com link, a trailing .git or /.
+function normalizeRepo(v: string) {
+  return v.replace(/^ +| +$/g, "").replace(/^https:\/\/github\.com\//i, "").replace(/\/$/, "").replace(/\.git$/, "");
+}
+function isRepo(v: string) {
+  const parts = v.split("/");
+  return parts.length === 2 && parts.every((p) => NAME_RE.test(p) && !p.endsWith(".git"));
+}
 
 // The key lives in the fragment of the link the terminal printed. undefined while prerendering.
 function subscribeHash(onChange: () => void) {
@@ -46,7 +58,9 @@ export function SetupForm() {
   const [starterName, setStarterName] = useState("");
   const [starterKind, setStarterKind] = useState<StarterKind>("node-app");
   const [sending, setSending] = useState(false);
-  const [done, setDone] = useState(false);
+  const [done, setDone] = useState<Mode | null>(null);
+  const [mode, setMode] = useState<Mode>("repos");
+  const [workRepo, setWorkRepo] = useState("");
   const latestOrg = useRef("");
 
   const chooseOrg = useCallback(
@@ -75,6 +89,7 @@ export function SetupForm() {
       (s) => {
         setState(s);
         const usable = s.orgs.filter((o) => o.usable);
+        if (usable.length === 0) setMode("tools");
         if (usable.length === 1) chooseOrg(usable[0].login);
       },
       (e: Error) => setError(e.message),
@@ -103,7 +118,9 @@ export function SetupForm() {
             Back to your terminal
           </CardTitle>
           <CardDescription>
-            qq-setup has your answers and shows the plan there. You can close this tab.
+            {done === "tools"
+              ? "qq-setup printed the commands there. You can close this tab."
+              : "qq-setup has your answers and shows the plan there. You can close this tab."}
           </CardDescription>
         </CardHeader>
       </Card>
@@ -135,7 +152,26 @@ export function SetupForm() {
         repos: [...picked],
         starter: starterOn ? { name: starterName, kind: starterKind } : null,
       });
-      setDone(true);
+      setDone("repos");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  const repoForTools = normalizeRepo(workRepo);
+  // Blank means "no repo"; anything else (".git", a bare github.com link) must name one.
+  const workRepoError =
+    workRepo.trim() && !isRepo(repoForTools) ? "Write it as owner/name, like quirq-ai/innernet." : null;
+
+  async function sendTools() {
+    if (!key) return;
+    setSending(true);
+    setError(null);
+    try {
+      await api.submit(key, { mode: "tools", repo: repoForTools || null });
+      setDone("tools");
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -144,24 +180,25 @@ export function SetupForm() {
   }
 
   const usableRepos = list?.repos.filter((r) => r.usable) ?? [];
+  const ownsAnOrg = !!state?.orgs.some((o) => o.usable);
   const otherRepos = list?.repos.filter((r) => !r.usable) ?? [];
 
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
-        <h1 className="font-display text-2xl">Set up qq for your GitHub org</h1>
+        <h1 className="font-display text-2xl">Set up qq</h1>
         <p className="text-muted-foreground">
-          Pick an org and the repos to put under qq. Your answers go back to the terminal, which shows
-          the plan before anything happens.
+          Put your org&apos;s repos under qq, or install qq on this machine to work on a repo that already uses
+          it. Your answer goes back to the terminal.
         </p>
         {state?.readOnly && (
           <p className="text-sm text-muted-foreground">
-            This version only shows the plan. It creates and changes nothing.
+            This version only shows the plan or prints commands. It creates, changes and installs nothing.
           </p>
         )}
       </div>
 
-      {error && (
+      {error && !(state && mode === "tools") && (
         <Alert variant="destructive" role="alert">
           <TriangleAlert />
           <AlertTitle>Something went wrong</AlertTitle>
@@ -176,6 +213,63 @@ export function SetupForm() {
       )}
 
       {state && (
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              <h2 className="font-display text-lg">What do you want to do?</h2>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <RadioGroup value={mode} onValueChange={(v) => setMode(v as Mode)} aria-label="What do you want to do?">
+              <div className="flex items-start gap-3">
+                <RadioGroupItem
+                  value="repos"
+                  id="mode-repos"
+                  disabled={!ownsAnOrg}
+                  className="mt-0.5"
+                  aria-describedby="mode-repos-what"
+                />
+                <div className="flex flex-col gap-0.5">
+                  {/* Only the label dims: the line under it is the explanation. */}
+                  <Label htmlFor="mode-repos" className={ownsAnOrg ? undefined : "opacity-50"}>
+                    Set up repos in an org I own
+                  </Label>
+                  <span id="mode-repos-what" className="text-sm text-muted-foreground">
+                    {ownsAnOrg
+                      ? "Pick the org and repos. The terminal shows the plan."
+                      : "You own no GitHub org yet: create a free one at github.com/account/organizations/new, then run qq-setup again."}
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <RadioGroupItem value="tools" id="mode-tools" className="mt-0.5" aria-describedby="mode-tools-what" />
+                <div className="flex flex-col gap-0.5">
+                  <Label htmlFor="mode-tools">Install qq on my machine and work on a repo</Label>
+                  <span id="mode-tools-what" className="text-sm text-muted-foreground">
+                    For a repo that already uses qq. The terminal prints the commands.
+                  </span>
+                </div>
+              </div>
+            </RadioGroup>
+          </CardContent>
+        </Card>
+      )}
+
+      {state && mode === "tools" && (
+        <ToolsSteps
+          tools={state.tools}
+          mac={state.platform === "darwin"}
+          error={error}
+          repo={workRepo}
+          okRepo={repoForTools && !workRepoError ? repoForTools : null}
+          repoError={workRepoError}
+          onRepo={setWorkRepo}
+          sending={sending}
+          onSend={sendTools}
+        />
+      )}
+
+      {state && mode === "repos" && (
         <Card>
           <CardHeader>
             <CardTitle>
@@ -214,7 +308,7 @@ export function SetupForm() {
         </Card>
       )}
 
-      {org && (
+      {mode === "repos" && org && (
         <Card>
           <CardHeader>
             <CardTitle>
@@ -280,7 +374,7 @@ export function SetupForm() {
         </Card>
       )}
 
-      {org && list && (
+      {mode === "repos" && org && list && (
         <Card>
           <CardHeader>
             <CardTitle>
@@ -333,7 +427,7 @@ export function SetupForm() {
         </Card>
       )}
 
-      {org && list && (
+      {mode === "repos" && org && list && (
         <div className="flex flex-col gap-2">
           <Button
             size="lg"
@@ -357,5 +451,143 @@ export function SetupForm() {
         </div>
       )}
     </div>
+  );
+}
+
+function Command({ children, label }: { children: string; label: string }) {
+  const [copied, setCopied] = useState<"yes" | "failed" | null>(null);
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-start gap-2">
+        {/* One line that scrolls inside the block: wrapping would split words at hyphens (~/qq-|tools). */}
+        <pre
+          tabIndex={0}
+          aria-label={label}
+          className="min-w-0 flex-1 overflow-x-auto rounded-md border border-border bg-muted px-3 py-2 font-mono text-sm whitespace-pre outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        >
+          {children}
+        </pre>
+        <Button
+          variant="outline"
+          size="icon"
+          aria-label={copied === "yes" ? `Copied: ${label}` : `Copy: ${label}`}
+          onClick={() => {
+            navigator.clipboard.writeText(children).then(
+              () => {
+                setCopied("yes");
+                setTimeout(() => setCopied(null), 2000);
+              },
+              () => setCopied("failed"),
+            );
+          }}
+        >
+          {copied === "yes" ? <Check aria-hidden /> : <Copy aria-hidden />}
+        </Button>
+      </div>
+      {copied === "failed" && (
+        <p role="alert" className="text-sm text-destructive">
+          Could not copy. Select the command and copy it yourself.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ToolsSteps(props: {
+  tools: Tools;
+  mac: boolean;
+  error: string | null;
+  repo: string;
+  okRepo: string | null;
+  repoError: string | null;
+  onRepo: (v: string) => void;
+  sending: boolean;
+  onSend: () => void;
+}) {
+  const { tools, mac, repoError } = props;
+  const url = `https://github.com/${props.okRepo ?? "OWNER/NAME"}`;
+  const getRepoLine = mac ? `git clone ${url}` : `qq fetch ${url}`;
+  return (
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            <h2 className="font-display text-lg">1. Install qq on this machine</h2>
+          </CardTitle>
+          <CardDescription>Run each command once. Each is safe to run again.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          {tools.install.map((s) => (
+            <div key={s.what} className="flex flex-col gap-2">
+              <p className="text-sm">{s.what}</p>
+              <Command label={s.what.replace(/ \(.*$/, "")}>{s.cmd}</Command>
+            </div>
+          ))}
+          <p className="text-sm text-muted-foreground">Needs {tools.needs}</p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            <h2 className="font-display text-lg">2. Get the repo and work in it</h2>
+          </CardTitle>
+          <CardDescription>The repo must have infra/repo.toml.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="work-repo">Repo (optional)</Label>
+            <Input
+              id="work-repo"
+              value={props.repo}
+              placeholder="owner/name"
+              onChange={(e) => props.onRepo(e.target.value)}
+              aria-invalid={!!repoError}
+              aria-describedby={repoError ? "work-repo-error" : undefined}
+              autoComplete="off"
+              spellCheck={false}
+              className="font-mono"
+            />
+            {repoError && (
+              <p id="work-repo-error" className="text-sm text-destructive">
+                {repoError}
+              </p>
+            )}
+          </div>
+          <Command label={mac ? "Clone the repo" : "Get the repo"}>{getRepoLine}</Command>
+          {mac && <p className="text-sm text-muted-foreground">{tools.mac}</p>}
+          {tools.use.length > 0 && (
+            <ul className="flex flex-col gap-1 text-sm">
+              {tools.use.map((u) => (
+                <li key={u.cmd}>
+                  <code className="font-mono">{u.cmd}</code>
+                  <span className="text-muted-foreground">: {u.what}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {tools.useNote && <p className="text-sm text-muted-foreground">{tools.useNote}</p>}
+          <p className="text-sm text-muted-foreground">{tools.access}</p>
+        </CardContent>
+      </Card>
+
+      <div className="flex flex-col gap-2">
+        <Button
+          size="lg"
+          disabled={props.sending || !!repoError}
+          onClick={props.onSend}
+          aria-describedby={repoError ? "work-repo-error" : undefined}
+          className="w-full sm:w-fit"
+        >
+          {props.sending && <Spinner />} Print these in my terminal
+        </Button>
+        {props.error && (
+          <p role="alert" className="text-sm text-destructive">
+            {props.error}
+          </p>
+        )}
+        <p className="text-sm text-muted-foreground">qq-setup prints the commands. It runs none of them.</p>
+      </div>
+    </>
   );
 }

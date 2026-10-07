@@ -1,19 +1,22 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { expect, test } from "@playwright/test";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const SHOTS = join(ROOT, "test-results", "screenshots");
+// The line that gets a repo: qq fetch, or git clone on a Mac, where qq fetch stops after cloning.
+const GET = process.platform === "darwin" ? "git clone" : "qq fetch";
+const AS_DARWIN = ["--import", pathToFileURL(join(ROOT, "tests", "e2e", "as-darwin.mjs")).href];
 
 type Cli = { proc: ChildProcess; url: string; output: () => string; exited: Promise<number | null> };
 
 /** Start the real CLI with the fake gh first on PATH and no token variables. */
-async function startCli(): Promise<Cli> {
-  const env: NodeJS.ProcessEnv = { ...process.env, PATH: `${join(ROOT, "tests", "fake-gh")}:${process.env.PATH}`, NO_COLOR: "1" };
+async function startCli(extra: Record<string, string> = {}, nodeArgs: string[] = []): Promise<Cli> {
+  const env: NodeJS.ProcessEnv = { ...process.env, PATH: `${join(ROOT, "tests", "fake-gh")}:${process.env.PATH}`, NO_COLOR: "1", ...extra };
   for (const v of ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"]) delete env[v];
-  const proc = spawn(process.execPath, [join(ROOT, "cli", "bin.mjs"), "--no-browser"], { env });
+  const proc = spawn(process.execPath, [...nodeArgs, join(ROOT, "cli", "bin.mjs"), "--no-browser"], { env });
   let out = "";
   proc.stdout!.on("data", (c) => (out += c));
   proc.stderr!.on("data", (c) => (out += c));
@@ -119,6 +122,122 @@ test("a page without the key gets nothing from the API", async ({ browser }) => 
     const res = await page.request.get(`${bare}api/state`);
     expect(res.status()).toBe(403);
     expect(await res.text()).not.toContain("acme-labs");
+  } finally {
+    cli.proc.kill();
+    await page.close();
+  }
+});
+
+for (const scheme of ["light", "dark"] as const) {
+  for (const width of [390, 1280]) {
+    test(`tools ${width}px ${scheme}: the install and fetch commands print in the terminal`, async ({ browser }) => {
+      const cli = await startCli();
+      const page = await browser.newPage({ viewport: { width, height: width === 390 ? 844 : 800 }, colorScheme: scheme });
+      try {
+        await page.goto(cli.url);
+        await expect(page.getByRole("radio", { name: /acme-labs/ })).toBeChecked();
+        await page.getByRole("radio", { name: "Install qq on my machine and work on a repo" }).check();
+        await expect(page.getByRole("radio", { name: /acme-labs/ })).toHaveCount(0);
+        await expect(page.getByText("1. Install qq on this machine")).toBeVisible();
+        await expect(page.getByText(/git clone -q https:\/\/github\.com\/quirq-ai\/depot/)).toBeVisible();
+        for (const notARepo of [".git", "https://github.com/"]) {
+          await page.getByLabel("Repo (optional)").fill(notARepo);
+          await expect(page.getByText("Write it as owner/name, like quirq-ai/innernet.")).toBeVisible();
+        }
+        await page.getByLabel("Repo (optional)").fill("innernet");
+        await expect(page.getByText("Write it as owner/name, like quirq-ai/innernet.")).toBeVisible();
+        await expect(page.getByRole("button", { name: /Print these/ })).toBeDisabled();
+        // A pasted link with .git is taken as the owner/name it names.
+        await page.getByLabel("Repo (optional)").fill("https://github.com/quirq-ai/innernet.git");
+        await expect(page.getByText(`${GET} https://github.com/quirq-ai/innernet`, { exact: true })).toBeVisible();
+        await expect(page.getByText("Write it as owner/name", { exact: false })).toHaveCount(0);
+        // Commands never wrap, so no word is split: each block scrolls on its own, the page does not.
+        for (const pre of await page.locator("pre").all()) {
+          expect(await pre.evaluate((el) => getComputedStyle(el).whiteSpace)).toBe("pre");
+          expect(await pre.evaluate((el) => getComputedStyle(el).overflowX)).toBe("auto");
+        }
+
+        const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+        expect(overflow).toBeLessThanOrEqual(0);
+        mkdirSync(SHOTS, { recursive: true });
+        await page.screenshot({ path: join(SHOTS, `tools-${width}-${scheme}.png`), fullPage: true });
+
+        await page.getByRole("button", { name: /Print these/ }).click();
+        await expect(page.getByText("qq-setup printed the commands there.", { exact: false })).toBeVisible();
+        expect(await cli.exited).toBe(0);
+        const out = cli.output();
+        expect(out).toContain("Install qq on this machine. Run each command once:");
+        expect(out).toContain(`${GET} https://github.com/quirq-ai/innernet`);
+        expect(out).toContain("Nothing was installed.");
+        expect(out).not.toContain("Plan for");
+      } finally {
+        cli.proc.kill();
+        await page.close();
+      }
+    });
+  }
+}
+
+test("a login that owns no org starts on the install commands", async ({ browser }) => {
+  const cli = await startCli({ FAKE_GH_NO_ORGS: "1" });
+  const page = await browser.newPage();
+  try {
+    expect(cli.output()).toContain("owns no GitHub org, so the form can only show how to install qq");
+    await page.goto(cli.url);
+    await expect(page.getByRole("radio", { name: "Install qq on my machine and work on a repo" })).toBeChecked();
+    await expect(page.getByText(/You own no GitHub org yet/)).toBeVisible();
+    await expect(page.getByRole("radio", { name: "Set up repos in an org I own" })).toBeDisabled();
+    await page.getByRole("button", { name: /Print these/ }).click();
+    expect(await cli.exited).toBe(0);
+    expect(cli.output()).toContain(`${GET} https://github.com/OWNER/NAME`);
+  } finally {
+    cli.proc.kill();
+    await page.close();
+  }
+});
+
+test("each command has a copy button that copies it exactly", async ({ browser }) => {
+  const cli = await startCli();
+  const context = await browser.newContext({ permissions: ["clipboard-read", "clipboard-write"] });
+  const page = await context.newPage();
+  try {
+    await page.goto(cli.url);
+    await page.getByRole("radio", { name: "Install qq on my machine and work on a repo" }).check();
+    for (const name of ["Copy: Install qq", "Copy: Install qqsync", "Copy: Put both on your PATH", "Copy: Get the repo"]) {
+      await expect(page.getByRole("button", { name, exact: true })).toHaveCount(1);
+    }
+    await page.getByRole("button", { name: "Copy: Install qq", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Copied: Install qq" })).toBeVisible();
+    const copied = await page.evaluate(() => navigator.clipboard.readText());
+    expect(copied).toBe(await page.locator("pre").first().innerText());
+    expect(copied).toMatch(/^\( set -e; mkdir -p ~\/qq-tools; rm -rf ~\/qq-tools\/depot; git clone -q /);
+  } finally {
+    cli.proc.kill();
+    await context.close();
+  }
+});
+
+test("on a Mac: git clone, the note beside it, and no command that fails there", async ({ browser }) => {
+  const cli = await startCli({}, AS_DARWIN);
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  try {
+    expect(cli.output()).toContain("macOS: setup works here.");
+    await page.goto(cli.url);
+    await page.getByRole("radio", { name: "Install qq on my machine and work on a repo" }).check();
+    await page.getByLabel("Repo (optional)").fill("quirq-ai/innernet");
+    await expect(page.getByText("git clone https://github.com/quirq-ai/innernet", { exact: true })).toBeVisible();
+    await expect(page.getByText(/need Linux x86_64 for now/)).toBeVisible();
+    await expect(page.getByText(/^qq fetch https/)).toHaveCount(0);
+    for (const cmd of ["qq sync", "qq build [TARGET]", "qq test [TARGET]", 'qq run "COMMAND"']) {
+      await expect(page.getByText(cmd, { exact: true })).toHaveCount(0);
+    }
+    mkdirSync(SHOTS, { recursive: true });
+    await page.screenshot({ path: join(SHOTS, "tools-390-mac.png"), fullPage: true });
+    await page.getByRole("button", { name: /Print these/ }).click();
+    expect(await cli.exited).toBe(0);
+    const out = cli.output();
+    expect(out).toContain("     git clone https://github.com/quirq-ai/innernet\n");
+    expect(out).not.toMatch(/qq fetch https|Inside it:/);
   } finally {
     cli.proc.kill();
     await page.close();

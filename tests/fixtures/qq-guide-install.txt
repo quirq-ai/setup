@@ -1,0 +1,5 @@
+# The three install commands in quirq-ai/docs content/docs/qq.mdx at 5d9371c5b79aaa79514e1a2bbecf10b4967dc343,
+# lines 83, 87 and 91, copied unchanged. cli/tools.mjs must print exactly these; update both together.
+( set -e; mkdir -p ~/qq-tools; rm -rf ~/qq-tools/depot; git clone -q https://github.com/quirq-ai/depot ~/qq-tools/depot; ~/qq-tools/depot/bin/qq --version )
+( set -e; mkdir -p ~/qq-tools; rm -rf ~/qq-tools/qqsync; python3 -m venv ~/qq-tools/qqsync; ~/qq-tools/qqsync/bin/pip install -q --disable-pip-version-check "qqsync @ git+https://github.com/quirq-ai/sync@main"; ~/qq-tools/qqsync/bin/qqsync --version )
+( case "$SHELL" in */bash) rc=~/.bashrc ;; *) rc=~/.zshrc ;; esac; mkdir -p ~/qq-tools/bin && ln -sf ~/qq-tools/depot/bin/qq ~/qq-tools/qqsync/bin/qqsync ~/qq-tools/bin/ && { grep -qs 'qq-tools/bin:' "$rc" || printf '\nexport PATH="$HOME/qq-tools/bin:$PATH"\n' >> "$rc"; } && echo "qq-tools/bin is on PATH in $rc; open a new terminal" )
