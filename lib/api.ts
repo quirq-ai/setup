@@ -21,7 +21,7 @@ export type Repo = {
 export type Tools = {
   install: { what: string; cmd: string }[];
   use: { cmd: string; what: string }[];
-  useNote: string | null;
+  useNote: string;
   needs: string;
   mac: string;
   access: string;

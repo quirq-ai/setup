@@ -103,10 +103,7 @@ export async function whoami() {
   return { login: JSON.parse(body).login, scopes };
 }
 
-/** GitHub's rule for org and repo names, plus a length cap. @param {unknown} s @returns {s is string} */
-export function isName(s) {
-  return typeof s === "string" && /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,99})$/.test(s) && !s.endsWith(".git");
-}
+export { isName } from "./names.mjs";
 
 /** Percent-encode a branch name for a query string, leaving only characters PATH_RE accepts. @param {string} ref */
 export function encodeRef(ref) {

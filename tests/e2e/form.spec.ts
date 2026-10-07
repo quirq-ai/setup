@@ -98,6 +98,9 @@ test("a starter name taken by a repo the form did not list is refused", async ({
     await page.goto(cli.url);
     await expect(page.getByRole("radio", { name: /acme-labs/ })).toBeChecked();
     await page.getByRole("checkbox", { name: "Create a starter repo" }).check();
+    // The form uses the terminal's own name rule (cli/names.mjs), so .git in any case is refused here.
+    await page.getByLabel("Name").fill("new-app.Git");
+    await expect(page.getByText(/not ending in \.git/)).toBeVisible();
     await page.getByLabel("Name").fill("old-archive-2019");
     await page.getByRole("button", { name: /Show the plan/ }).click();
     await expect(page.getByText("old-archive-2019 already exists in acme-labs")).toBeVisible();
@@ -203,7 +206,8 @@ test("each command has a copy button that copies it exactly", async ({ browser }
   try {
     await page.goto(cli.url);
     await page.getByRole("radio", { name: "Install qq on my machine and work on a repo" }).check();
-    for (const name of ["Copy: Install qq", "Copy: Install qqsync", "Copy: Put both on your PATH", "Copy: Get the repo"]) {
+    const getRepo = process.platform === "darwin" ? "Copy: Clone the repo" : "Copy: Get the repo";
+    for (const name of ["Copy: Install qq", "Copy: Install qqsync", "Copy: Put both on your PATH", getRepo]) {
       await expect(page.getByRole("button", { name, exact: true })).toHaveCount(1);
     }
     await page.getByRole("button", { name: "Copy: Install qq", exact: true }).click();
@@ -217,19 +221,24 @@ test("each command has a copy button that copies it exactly", async ({ browser }
   }
 });
 
-test("on a Mac: git clone, the note beside it, and no command that fails there", async ({ browser }) => {
+test("on a Mac: git clone, the note beside it, and no qq sync", async ({ browser }) => {
   const cli = await startCli({}, AS_DARWIN);
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   try {
     expect(cli.output()).toContain("macOS: setup works here.");
     await page.goto(cli.url);
     await page.getByRole("radio", { name: "Install qq on my machine and work on a repo" }).check();
+    // A tab is not blank: the page refuses it, as the terminal does.
+    await page.getByLabel("Repo (optional)").fill("\t");
+    await expect(page.getByText("Write it as owner/name, like quirq-ai/innernet.")).toBeVisible();
+    await expect(page.getByRole("button", { name: /Print these/ })).toBeDisabled();
     await page.getByLabel("Repo (optional)").fill("quirq-ai/innernet");
     await expect(page.getByText("git clone https://github.com/quirq-ai/innernet", { exact: true })).toBeVisible();
-    await expect(page.getByText(/need Linux x86_64 for now/)).toBeVisible();
+    await expect(page.getByText(/stops with "no pin for platform".*--toolchain NAME=ROOT/)).toBeVisible();
     await expect(page.getByText(/^qq fetch https/)).toHaveCount(0);
-    for (const cmd of ["qq sync", "qq build [TARGET]", "qq test [TARGET]", 'qq run "COMMAND"']) {
-      await expect(page.getByText(cmd, { exact: true })).toHaveCount(0);
+    await expect(page.getByText("qq sync", { exact: true })).toHaveCount(0);
+    for (const cmd of ["qq build [TARGET]", "qq test [TARGET]", 'qq run "COMMAND"']) {
+      await expect(page.getByText(cmd, { exact: true })).toHaveCount(1);
     }
     mkdirSync(SHOTS, { recursive: true });
     await page.screenshot({ path: join(SHOTS, "tools-390-mac.png"), fullPage: true });
@@ -237,7 +246,8 @@ test("on a Mac: git clone, the note beside it, and no command that fails there",
     expect(await cli.exited).toBe(0);
     const out = cli.output();
     expect(out).toContain("     git clone https://github.com/quirq-ai/innernet\n");
-    expect(out).not.toMatch(/qq fetch https|Inside it:/);
+    expect(out).not.toMatch(/qq fetch https|^ +qq sync/m);
+    expect(out).toMatch(/Inside it:\n +qq build/);
   } finally {
     cli.proc.kill();
     await page.close();
