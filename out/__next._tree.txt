@@ -1,3 +1,3 @@
-:HL["/_next/static/chunks/3aycdq1yz6gbi.css","style"]
+:HL["/_next/static/chunks/09uz-g817e69y.css","style"]
 :HL["/brand/quirq/wordmark.svg","image"]
 0:{"tree":{"name":"","param":null,"prefetchHints":4176,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":4256,"slots":null}}},"staleTime":300,"buildId":"qq-setup"}

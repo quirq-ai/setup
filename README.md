@@ -74,13 +74,18 @@ request from the form for 30 minutes), 2 error. Ctrl-C stops it by signal, which
 
 It works the same. macOS ships Python 3.9, so the later setup step needs a newer one
 (`brew install python@3.14`), as does installing qq. The form, the terminal and this section say the
-same thing: qq fetches toolchains for Linux x86_64 only, so on a Mac `qq fetch` and `qq sync` stop
-with "no pin for platform": clone with git and install the repo's pinned tools yourself
-(`qqsync show infra/repo.toml` lists them). `qq build` and `qq test` then use them, from
-`--toolchain NAME=ROOT` or your `PATH`, and still check the pinned versions; `qq run` uses your
-`PATH`. So on a Mac the form and terminal show `git clone` instead of `qq fetch`, leave out
+same thing:
+
+qq fetches toolchains for Linux x86_64 only, so on a Mac qq fetch clones the repo and then stops with
+"no pin for platform", and qq sync stops the same way: clone with git and install the repo's pinned
+tools yourself (qqsync show infra/repo.toml lists them). qq build and qq test then use them, from
+--toolchain NAME=ROOT or your PATH, and still check the pinned versions (exact Python, Node major);
+qq run uses your PATH.
+
+So on a Mac the form and terminal show `git clone` instead of `qq fetch`, leave out
 `qq sync`, and list `qq build`, `qq test` and `qq run`. See the
-[qq guide](https://docs.quirq.dev/docs/qq). CI runs on GitHub's Linux runners.
+[qq guide](https://docs.quirq.dev/docs/qq). The CI workflows qq sets up for a repo run on
+GitHub's Linux runners, whatever machine you work on.
 
 ## Develop
 

@@ -98,6 +98,9 @@ test("a starter name taken by a repo the form did not list is refused", async ({
     await page.goto(cli.url);
     await expect(page.getByRole("radio", { name: /acme-labs/ })).toBeChecked();
     await page.getByRole("checkbox", { name: "Create a starter repo" }).check();
+    // The form uses the terminal's own name rule (cli/names.mjs), so .git in any case is refused here.
+    await page.getByLabel("Name").fill("new-app.Git");
+    await expect(page.getByText(/not ending in \.git/)).toBeVisible();
     await page.getByLabel("Name").fill("old-archive-2019");
     await page.getByRole("button", { name: /Show the plan/ }).click();
     await expect(page.getByText("old-archive-2019 already exists in acme-labs")).toBeVisible();
@@ -231,7 +234,7 @@ test("on a Mac: git clone, the note beside it, and no qq sync", async ({ browser
     await expect(page.getByRole("button", { name: /Print these/ })).toBeDisabled();
     await page.getByLabel("Repo (optional)").fill("quirq-ai/innernet");
     await expect(page.getByText("git clone https://github.com/quirq-ai/innernet", { exact: true })).toBeVisible();
-    await expect(page.getByText(/stop with "no pin for platform".*--toolchain NAME=ROOT/)).toBeVisible();
+    await expect(page.getByText(/stops with "no pin for platform".*--toolchain NAME=ROOT/)).toBeVisible();
     await expect(page.getByText(/^qq fetch https/)).toHaveCount(0);
     await expect(page.getByText("qq sync", { exact: true })).toHaveCount(0);
     for (const cmd of ["qq build [TARGET]", "qq test [TARGET]", 'qq run "COMMAND"']) {

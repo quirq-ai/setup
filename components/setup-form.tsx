@@ -22,9 +22,7 @@ import {
   type State,
   type Tools,
 } from "@/lib/api";
-import { isBlankRepo, parseRepo } from "@/cli/names.mjs";
-
-const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
+import { isBlankRepo, isName, parseRepo } from "@/cli/names.mjs";
 
 type Mode = "repos" | "tools";
 
@@ -120,8 +118,8 @@ export function SetupForm() {
   }
 
   const starterError =
-    starterOn && starterName && !NAME_RE.test(starterName)
-      ? "Letters, digits, '.', '_' and '-' only."
+    starterOn && starterName && !isName(starterName)
+      ? "Letters, digits, '.', '_' and '-' only, starting with a letter or digit and not ending in .git."
       : starterOn && list?.repos.some((r) => r.name.toLowerCase() === starterName.toLowerCase())
         ? `${org} already has a repo with this name.`
         : null;
@@ -455,7 +453,7 @@ function Command({ children, label }: { children: string; label: string }) {
         {/* One line that scrolls inside the block: wrapping would split words at hyphens (~/qq-|tools). */}
         <pre
           tabIndex={0}
-          className="min-w-0 flex-1 overflow-x-auto rounded-md border border-border bg-muted px-3 py-2 font-mono text-sm whitespace-pre outline-hidden focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          className="min-w-0 flex-1 overflow-x-auto rounded-md border border-border bg-muted px-3 py-2 font-mono text-sm whitespace-pre focus-visible:outline-hidden focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
         >
           {children}
         </pre>

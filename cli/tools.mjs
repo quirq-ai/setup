@@ -43,16 +43,12 @@ export const USE_NOTE =
 
 export const NEEDS = "git and python3 3.11.4 or newer with its venv module (Debian/Ubuntu: python3-venv).";
 
-/**
- * One statement about macOS, shared with preflight and the README so nothing says two things.
- * Checked against depot 52d4e99 on macOS: fetch and sync stop; build and test take --toolchain or
- * PATH and check the pinned versions; run uses PATH. (Intel Macs name a different platform, so
- * only "no pin for platform" is quoted.)
- */
+/** One statement about macOS, shared with preflight, the page and the README (a test keeps them equal). */
 export const MAC =
-  "qq fetches toolchains for Linux x86_64 only, so on a Mac qq fetch and qq sync stop with \"no pin for platform\": " +
-  "clone with git and install the repo's pinned tools yourself (qqsync show infra/repo.toml lists them). " +
-  "qq build and qq test then use them, from --toolchain NAME=ROOT or your PATH, and still check the pinned versions; " +
+  "qq fetches toolchains for Linux x86_64 only, so on a Mac qq fetch clones the repo and then stops with " +
+  "\"no pin for platform\", and qq sync stops the same way: clone with git and install the repo's pinned tools " +
+  "yourself (qqsync show infra/repo.toml lists them). qq build and qq test then use them, from " +
+  "--toolchain NAME=ROOT or your PATH, and still check the pinned versions (exact Python, Node major); " +
   "qq run uses your PATH.";
 
 /**

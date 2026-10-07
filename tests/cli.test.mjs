@@ -16,7 +16,7 @@ import { checks } from "../cli/preflight.mjs";
 import { listRepos } from "../cli/facts.mjs";
 import { classicFromError, protectionWarnings } from "../cli/protection.mjs";
 import { isBlankRepo, normalizeRepo, parseRepo } from "../cli/names.mjs";
-import { checkTools, commandsFor, getLine, INSTALL, toolsText } from "../cli/tools.mjs";
+import { checkTools, commandsFor, getLine, INSTALL, MAC, toolsText } from "../cli/tools.mjs";
 import { startServer } from "../cli/server.mjs";
 
 test("detectKinds offers a kind only when kinds.toml's stand-in commands will run", () => {
@@ -314,6 +314,11 @@ test("the install commands are the qq guide's, byte for byte", async () => {
   assert.deepEqual(INSTALL.map((s) => s.cmd), fixture);
 });
 
+test("the README says the same about macOS as the page and the terminal", () => {
+  const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8").replace(/\s+/g, " ");
+  assert.ok(readme.includes(MAC), "README.md must contain the MAC text from cli/tools.mjs");
+});
+
 test("toolsText: install commands, then the line that gets the repo for this platform", () => {
   const linux = toolsText("quirq-ai/innernet", "linux").join("\n");
   for (const s of INSTALL) assert.ok(linux.includes(s.cmd));
@@ -322,8 +327,8 @@ test("toolsText: install commands, then the line that gets the repo for this pla
   const mac = toolsText("quirq-ai/innernet", "darwin").join("\n");
   assert.match(mac, /git clone https:\/\/github\.com\/quirq-ai\/innernet\n/);
   assert.doesNotMatch(mac, /qq fetch https/);
-  assert.match(mac, /stop with "no pin for platform"/);
-  assert.match(mac, /--toolchain NAME=ROOT or your PATH, and still check the pinned versions; qq run uses your PATH/);
+  assert.match(mac, /qq fetch clones the repo and then stops with "no pin for platform"/);
+  assert.match(mac, /--toolchain NAME=ROOT or your PATH, and still check the pinned versions \(exact Python, Node major\); qq run uses your PATH/);
   // On a Mac, qq sync stops, so it is not listed; build, test and run are, with the note.
   assert.doesNotMatch(mac, /^ +qq sync/m);
   assert.match(mac, /Inside it:\n +qq build/);
