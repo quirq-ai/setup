@@ -10,12 +10,17 @@ import { detectKinds } from "../cli/detect.mjs";
 import { encodeRef, ghEnv, isName } from "../cli/gh.mjs";
 import { buildPlan, checkAnswers } from "../cli/plan.mjs";
 import { checks } from "../cli/preflight.mjs";
+import { protectionWarnings } from "../cli/protection.mjs";
 import { startServer } from "../cli/server.mjs";
 
 test("detectKinds offers a kind only when kinds.toml's stand-in commands will run", () => {
   const next = { dependencies: { next: "16.3.8" }, scripts: { build: "next build", typecheck: "tsc --noEmit" } };
-  assert.deepEqual(detectKinds(["requirements.txt", "requirements-dev.txt"], { requirementsDev: "pytest==8.4\nruff\n" }).kinds,
+  assert.deepEqual(detectKinds(["requirements.txt", "requirements-dev.txt", "tests"], { requirementsDev: "pytest==8.4\nruff\n" }).kinds,
     ["python-service", "pytest"]);
+  assert.deepEqual(detectKinds(["requirements-dev.txt", "test_app.py"], { requirementsDev: "pytest\n" }).kinds, ["pytest"]);
+  const noTests = detectKinds(["requirements-dev.txt", "app.py"], { requirementsDev: "pytest\n" });
+  assert.deepEqual(noTests.kinds, []);
+  assert.match(noTests.notes[0], /no tests\/ directory/);
   assert.deepEqual(detectKinds(["package.json", "pnpm-lock.yaml"], { packageJson: next }).kinds, ["node-app"]);
   assert.deepEqual(detectKinds(["package.json", "pnpm-lock.yaml"],
     { packageJson: { dependencies: { gatsby: "4" }, scripts: { build: "gatsby build", test: "node --test" } } }).kinds, ["gatsby-site"]);
@@ -101,12 +106,16 @@ test("buildPlan names every write, and what v0 leaves out", () => {
   assert.match(text, /Create acme\/new \(public\) from the Next\.js 16 app/);
   assert.match(text, /acme\/api \(python-service, pytest\): add infra\/repo\.toml/);
   assert.match(text, /acme\/web \(node-app\): keep its infra\/repo\.toml, add the generated/);
-  assert.match(plan.does[0], /^Before you type yes: read each repo's existing protection/);
+  assert.match(plan.does[0], /^Right before writing, read each repo's merge settings, rulesets and branch protection again/);
+  assert.match(plan.does[0], /this version read them once/);
   assert.match(text, /only when its presubmit is green and no review is required; otherwise leave it open/);
   assert.doesNotMatch(text, /merge it once its presubmit is green/);
   for (const r of ["api", "web", "new"]) assert.match(text, new RegExp(`Protect acme/${r}'s default branch`));
   assert.match(plan.later.join("\n"), /canary/);
-  assert.match(buildPlan({ org: "acme", repos: ["api"], starter: null }, repos, true).does[1], /^Update acme\/qq-config/);
+  assert.match(plan.later.join("\n"), /honour-based/);
+  assert.match(plan.later.join("\n"), /qq land does not know your repos/);
+  assert.match(plan.later.join("\n"), /To undo setup: delete the qq-main and qq-reserved-tags rulesets/);
+  assert.match(buildPlan({ org: "acme", repos: ["api"], starter: null }, repos, true).does[1], /^Update acme\/qq-config \(only if setup created it; otherwise setup stops\)/);
 });
 
 test("preflight checks: token variables, scopes, Python and macOS", () => {
@@ -125,7 +134,7 @@ test("preflight checks: token variables, scopes, Python and macOS", () => {
   // gh's default login (repo, read:org, gist) is enough for this build; workflow is a note for later.
   const dflt = checks({ ...base, scopes: ["repo", "read:org", "gist"] });
   assert.ok(dflt.every((c) => c.ok || !c.fatal));
-  assert.match(dflt.find((c) => c.name === "Scope for the setup step")?.detail ?? "", /--remove-scopes workflow/);
+  assert.match(dflt.find((c) => c.name === "Scope for the setup step")?.detail ?? "", /^not needed for this version; .*--remove-scopes workflow/);
   for (const c of checks(base)) assert.doesNotMatch(c.detail, /admin:org|delete_repo|-s gist/);
 
   const mac = checks({ ...base, platform: "darwin", python: "Python 3.9.6" });
@@ -134,7 +143,9 @@ test("preflight checks: token variables, scopes, Python and macOS", () => {
   assert.match(mac.find((c) => c.name === "macOS")?.detail ?? "", /Linux only/);
 
   assert.equal(checks({ ...base, node: "v20.11.0" })[0].ok, false);
-  assert.equal(checks({ ...base, login: null, loginError: "not logged in" }).find((c) => c.name === "gh login")?.ok, false);
+  const out = checks({ ...base, login: null, loginError: "not logged in" }).find((c) => c.name === "gh login");
+  assert.equal(out?.ok, false);
+  assert.equal(out?.detail, "not logged in: run  gh auth login");
 });
 
 /**
@@ -171,7 +182,8 @@ test("server: key, host, origin, body size and static files", async () => {
     handlers: {
       state: async () => ({ hello: "world" }),
       repos: async (org) => ({ org }),
-      submit: async (b) => (submitted.push(b), { ok: true }),
+      submit: async (b) =>
+        submitted.length ? { ok: false, status: 409, error: "already answered" } : (submitted.push(b), { ok: true }),
     },
   });
   try {
@@ -200,8 +212,30 @@ test("server: key, host, origin, body size and static files", async () => {
     assert.equal((await post("not json")).status, 400);
     assert.equal((await post(JSON.stringify({ pad: "x".repeat(20_000) }))).status, 413);
     assert.equal((await post(JSON.stringify({ org: "acme" }))).status, 200);
+    const again = await post(JSON.stringify({ org: "other" }));
+    assert.equal(again.status, 409);
+    assert.deepEqual(JSON.parse(again.body), { ok: false, error: "already answered" });
     assert.deepEqual(submitted, [{ org: "acme" }]);
   } finally {
     srv.close();
   }
+});
+
+test("protectionWarnings: clean, unknown never reads as clean, and classic protection", () => {
+  assert.deepEqual(protectionWarnings("main", { squash: true, rulesets: [], classic: "none" }), []);
+  assert.deepEqual(protectionWarnings("main", { squash: true, rulesets: ["qq-main"], classic: "none" }), []);
+
+  const unknown = protectionWarnings("main", { squash: null, rulesets: null, classic: "unreadable" });
+  assert.equal(unknown.length, 3);
+  assert.match(unknown.join("\n"), /could not read the merge settings/);
+  assert.match(unknown.join("\n"), /could not read its rulesets/);
+  assert.match(unknown.join("\n"), /could not read main's branch protection/);
+
+  const legacy = protectionWarnings("trunk", {
+    squash: false, rulesets: ["release-freeze", "qq-main"], classic: { checks: ["build", "lint"], reviews: 2 } });
+  assert.match(legacy[0], /squash merging is off/);
+  assert.match(legacy[1], /other rulesets apply \(release-freeze\)/);
+  assert.match(legacy[2], /^trunk has classic branch protection/);
+  assert.match(legacy[3], /\(build, lint\) must also run on merge_group/);
+  assert.match(legacy[4], /requires 2 approving reviews: setup would leave its pull request open/);
 });

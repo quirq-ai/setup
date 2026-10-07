@@ -88,7 +88,8 @@ export function SetupForm() {
         <TriangleAlert />
         <AlertTitle>Open this page from your terminal</AlertTitle>
         <AlertDescription>
-          Run <code className="font-mono">npx github:quirq-ai/setup#&lt;commit&gt;</code> and use the link it prints.
+          Run <code className="font-mono break-all">npx --allow-git=root github:quirq-ai/setup#&lt;commit&gt;</code> and
+          use the link it prints.
         </AlertDescription>
       </Alert>
     );
@@ -115,8 +116,14 @@ export function SetupForm() {
       : starterOn && list?.repos.some((r) => r.name.toLowerCase() === starterName.toLowerCase())
         ? `${org} already has a repo with this name.`
         : null;
-  const canSend =
-    !!org && !sending && (picked.size > 0 || (starterOn && !!starterName && !starterError));
+  const why = !org
+    ? "Pick an org to continue."
+    : starterError
+      ? "Fix the starter repo name to continue."
+      : picked.size === 0 && !(starterOn && starterName)
+        ? "Pick a repo or name a starter repo to continue."
+        : null;
+  const canSend = !sending && !why;
 
   async function send() {
     if (!key) return;
@@ -328,9 +335,20 @@ export function SetupForm() {
 
       {org && list && (
         <div className="flex flex-col gap-2">
-          <Button size="lg" disabled={!canSend} onClick={send} className="w-full sm:w-fit">
+          <Button
+            size="lg"
+            disabled={!canSend}
+            onClick={send}
+            aria-describedby={why ? "send-why" : undefined}
+            className="w-full sm:w-fit"
+          >
             {sending && <Spinner />} Show the plan in my terminal
           </Button>
+          {why && (
+            <p id="send-why" className="text-sm text-muted-foreground">
+              {why}
+            </p>
+          )}
           <p className="text-sm text-muted-foreground">
             {state?.readOnly
               ? "This version changes nothing on GitHub."

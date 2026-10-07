@@ -37,7 +37,7 @@ const MAX_BODY = 16 * 1024;
  * @typedef {{
  *   state: () => Promise<unknown>,
  *   repos: (org: string) => Promise<unknown>,
- *   submit: (body: unknown) => Promise<{ ok: true } | { ok: false, error: string }>,
+ *   submit: (body: unknown) => Promise<{ ok: true } | { ok: false, error: string, status?: number }>,
  * }} Handlers
  */
 
@@ -83,7 +83,8 @@ export async function startServer({ root, handlers, port = 0 }) {
             return send(res, 400, { error: "not JSON" });
           }
           const result = await handlers.submit(parsed);
-          return send(res, result.ok ? 200 : 400, result);
+          if (result.ok) return send(res, 200, result);
+          return send(res, result.status ?? 400, { ok: false, error: result.error });
         }
         return send(res, 404, { error: "no such endpoint" });
       }

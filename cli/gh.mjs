@@ -41,6 +41,10 @@ export function gh(args, opts = {}) {
         if (err) {
           const e = /** @type {NodeJS.ErrnoException & { code?: unknown }} */ (err);
           if (e.code === "ENOENT") return reject(new GhError("gh (GitHub CLI) is not installed: https://cli.github.com"));
+          // Logged out: gh exits 4 and its last line suggests GH_TOKEN, which this command refuses.
+          if (/** @type {unknown} */ (e.code) === 4 || String(stderr).includes("gh auth login")) {
+            return reject(new GhError("gh is not logged in: run  gh auth login", 401));
+          }
           const status = /HTTP (\d{3})/.exec(String(stderr))?.[1];
           const line = String(stderr).trim().split("\n").filter(Boolean).pop() ?? e.message;
           return reject(new GhError(`gh ${args[0]} failed: ${line}`, status ? Number(status) : null));
@@ -66,7 +70,7 @@ export async function getJson(path) {
 }
 
 /**
- * GET every page of a list endpoint (gh joins the pages).
+ * GET every page of a list endpoint, one page of 100 at a time, up to maxPages.
  * @param {string} path
  * @param {number} maxPages
  * @returns {Promise<any[]>}

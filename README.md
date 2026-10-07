@@ -4,12 +4,14 @@ One command to set up quirq infra (qq) for your GitHub org: the terminal checks 
 form in your browser asks which org and repos, and the terminal shows what it will do.
 
 ```sh
-npx github:quirq-ai/setup#<commit>
+npx --allow-git=root github:quirq-ai/setup#<commit>
 ```
 
-Always run it pinned to a full commit id from `main` (the `#<commit>` part): without one, npx runs
-whatever the default branch holds at that moment, with your GitHub login. The guide that links to
-this command names the commit.
+`<commit>` is the full id of the latest commit on
+[`main`](https://github.com/quirq-ai/setup/commits/main). Always pin it: without one, npx runs
+whatever the default branch holds at that moment, with your GitHub login. `--allow-git=root` lets
+npm run a package straight from git, which npm 12 refuses without it (npm 10 and 11 accept the flag
+too).
 
 **This version only reads.** It shows the plan and stops: it creates no repo, opens no pull request
 and changes no setting. The version that carries the plan out comes next, after review.
@@ -28,18 +30,21 @@ and changes no setting. The version that carries the plan out comes next, after 
    `build` and `typecheck` scripts) or Gatsby site (pnpm with `build` and `test` scripts). Others
    are listed with the reason, including private repos: GitHub offers a merge queue on private repos
    only on Enterprise Cloud, so v0 sets up public repos only.
-3. **Prints the plan** in the terminal: the config repo it would create, each pull request, each
-   ruleset, and what qq does not do for other orgs yet (watching `main`, lkgr, the canary,
-   dependency rolls, private repos).
+3. **Reads what already guards each picked repo** (merge settings, rulesets and branch
+   protection, all with GETs) and prints a warning for anything that would get in qq's way, or
+   "no existing protection found".
+4. **Prints the plan** in the terminal: the config repo it would create, each pull request, each
+   ruleset, what qq does not do for other orgs yet (watching `main`, lkgr, the canary, dependency
+   rolls, private repos, `qq land`), that on GitHub Free the gate is honour-based, and how to undo
+   setup.
 
 **Over SSH:** run it with `--no-browser --port N` and forward the same port number,
 `ssh -L N:127.0.0.1:N <host>`; then open the printed link on your own machine. The form answers only
 requests addressed to `127.0.0.1:N`, so a forward to a different local port is refused.
 
-Exit codes, as gate and installer use them: 0 done, 1 not ready or stopped (a failed check, no
-answer from the form), 2 error.
-
-The full plan for v0, v1 and v2 is in the project thread; this README changes with each step.
+Exit codes, as gate and installer use them: 0 done, 1 not ready or stopped (a failed check, or no
+request from the form for 30 minutes), 2 error. Ctrl-C stops it by signal, which shells report as
+130.
 
 ## How it keeps your login safe
 
@@ -69,8 +74,7 @@ npm run check-form  # rebuilds the form and fails if out/ differs from what is c
 npm run e2e         # Playwright: the real CLI against tests/fake-gh, 390 and 1280 px, light and dark
 ```
 
-npx installs straight from this repo and runs no install scripts (npm 12 skips them for git
-sources anyway), so the built form is committed in `out/` and the package has no runtime
+npx installs straight from this repo and must run no install scripts, so the built form is committed in `out/` and the package has no runtime
 dependencies. After changing `app/`, `components/` or `lib/`, run `npm run build` and commit `out/`;
 CI fails if it is stale. Publishing to npm is a later step that suraj decides.
 

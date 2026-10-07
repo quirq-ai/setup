@@ -11,6 +11,7 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -53,7 +54,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  # What `npx github:quirq-ai/setup#<commit>` runs: the package with its committed form and no install
+  # What `npx --allow-git=root github:quirq-ai/setup#<commit>` runs: the package with its committed form and no install
   # scripts, on Linux and macOS, Node 22 and 24.
   package:
     strategy:
@@ -62,6 +63,7 @@ jobs:
         os: [ubuntu-24.04, macos-15]
         node: [22, 24]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -95,3 +97,17 @@ jobs:
           node -e 'const s = require("./package.json").scripts; for (const k of ["preinstall","install","postinstall","prepare","prepack"]) if (s[k]) { console.error(`::error::package.json has a ${k} script; npx from git must run nothing at install`); process.exit(1) }'
           dir=$(mktemp -d)
           (cd "$dir" && npm install --silent --ignore-scripts --no-audit --no-fund "$GITHUB_WORKSPACE/$tgz" && npx --no-install qq-setup --version)
+
+      # npm 12 refuses git sources unless --allow-git=root is passed; one cell runs it on npm 12.
+      - name: Use npm 12
+        if: ${{ matrix.os == 'ubuntu-24.04' && matrix.node == 24 }}
+        run: npm install --global npm@12
+
+      - name: Run the CLI from git, as the README says
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm --version
+          sha=$(git rev-parse HEAD)
+          dir=$(mktemp -d)
+          (cd "$dir" && npx --yes --allow-git=root "git+file://$GITHUB_WORKSPACE#$sha" --version)

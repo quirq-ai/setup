@@ -77,9 +77,9 @@ export function buildPlan(a, listed, configExists) {
   const o = a.org;
   /** @type {string[]} */
   const does = [];
-  does.push(`Before you type yes: read each repo's existing protection, rulesets, merge settings and required reviews, and show every warning here`);
+  does.push(`Right before writing, read each repo's merge settings, rulesets and branch protection again, and stop on a warning that blocks a repo (this version read them once; the result is above)`);
   does.push(configExists
-    ? `Update ${o}/${CONFIG_REPO}: register the repos below and regenerate their workflows`
+    ? `Update ${o}/${CONFIG_REPO} (only if setup created it; otherwise setup stops): register the repos below and regenerate their workflows`
     : `Create ${o}/${CONFIG_REPO} (public, Apache-2.0): your qq policy, your repos and their builders`);
   if (a.starter) {
     does.push(`Create ${o}/${a.starter.name} (public) from the ${STARTERS[a.starter.kind]} template, with infra/repo.toml`);
@@ -100,6 +100,9 @@ export function buildPlan(a, listed, configExists) {
     "The daily canary channel",
     "Dependency and toolchain update pull requests",
     "Private repos",
+    "qq land does not know your repos yet: land changes through each repo's pull requests",
+    "On GitHub Free the gate is honour-based: a pull request can edit the required workflow it is checked by",
+    `To undo setup: delete the qq-main and qq-reserved-tags rulesets (each repo's Settings > Rules), revert the setup pull request, and delete ${o}/${CONFIG_REPO}`,
   ];
   return { does, later };
 }

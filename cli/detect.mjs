@@ -3,7 +3,8 @@
 // commands in infra-config config/kinds.toml as they are (audit S6), so the first presubmit is not
 // red for a reason setup could have seen:
 //   python-service  pip install -r requirements.txt; compileall
-//   pytest          pip install -r requirements-dev.txt; pytest   (so requirements-dev.txt names pytest)
+//   pytest          pip install -r requirements-dev.txt; pytest   (so requirements-dev.txt names pytest,
+//                   and tests are visible at the root: pytest exits 5 when it collects none)
 //   node-app        pnpm install --frozen-lockfile; pnpm build; pnpm typecheck   (Next.js)
 //   gatsby-site     pnpm install --frozen-lockfile; pnpm build; pnpm test
 // Anything else is "no kind yet", with a note saying what is missing.
@@ -33,8 +34,11 @@ export function detectKinds(rootNames, files = {}) {
 
   if (names.has("requirements.txt")) kinds.push("python-service");
   if (names.has("requirements-dev.txt")) {
-    if (/^\s*pytest\b/im.test(files.requirementsDev ?? "")) kinds.push("pytest");
-    else notes.push("requirements-dev.txt does not list pytest");
+    // pytest exits 5 when it collects no tests, which would make the first presubmit red.
+    const hasTests = names.has("tests") || names.has("test") || rootNames.some((n) => /^test_.*\.py$|_test\.py$/.test(n));
+    if (!/^\s*pytest\b/im.test(files.requirementsDev ?? "")) notes.push("requirements-dev.txt does not list pytest");
+    else if (!hasTests) notes.push("pytest is listed but no tests/ directory or test_*.py file is at the root (pytest fails when it finds no tests)");
+    else kinds.push("pytest");
   }
   if (!names.has("requirements.txt") && !names.has("requirements-dev.txt") &&
       (names.has("pyproject.toml") || names.has("setup.py"))) {

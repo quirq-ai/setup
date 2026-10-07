@@ -61,7 +61,7 @@ export function checks(seen) {
         const later = LATER_SCOPES.filter((x) => !has(x));
         if (later.length) {
           out.push({ name: "Scope for the setup step", ok: false, fatal: false,
-            detail: `the setup step will also need ${later.join(", ")} (gh auth refresh -h github.com -s ${later.join(",")}); ` +
+            detail: `not needed for this version; the setup step will also need ${later.join(", ")} (gh auth refresh -h github.com -s ${later.join(",")}); ` +
               `to drop it afterwards: gh auth refresh -h github.com --remove-scopes ${later.join(",")}` });
         }
       }
@@ -100,6 +100,7 @@ export async function preflight() {
       ({ login, scopes } = await whoami());
     } catch (e) {
       loginError = e instanceof Error ? e.message : String(e);
+      if (/gh auth login|GH_TOKEN/.test(loginError)) loginError = "not logged in"; // the detail adds the fix
     }
   }
   return checks({ node: process.version, platform: process.platform, env: process.env,

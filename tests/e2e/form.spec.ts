@@ -52,7 +52,8 @@ for (const scheme of ["light", "dark"] as const) {
         await page.getByRole("checkbox", { name: "Create a starter repo" }).check();
         await page.getByLabel("Name").fill("web");
         await expect(page.getByText("acme-labs already has a repo with this name.")).toBeVisible();
-        await expect(page.getByRole("button", { name: /Show the plan/ })).toBeEnabled(); // repos are picked
+        await expect(page.getByRole("button", { name: /Show the plan/ })).toBeDisabled();
+        await expect(page.getByText("Fix the starter repo name to continue.")).toBeVisible();
         await page.getByLabel("Name").fill("new-app");
         await expect(page.getByText(/already has a repo/)).toHaveCount(0);
 
@@ -72,6 +73,11 @@ for (const scheme of ["light", "dark"] as const) {
         expect(out).toContain("Plan for acme-labs");
         expect(out).toContain("Create acme-labs/new-app (public)");
         expect(out).toContain("Open a pull request in acme-labs/billing-api");
+        expect(out).toContain("billing-api: no existing protection found");
+        expect(out).toContain("web: warning: other rulesets apply (release-freeze)");
+        expect(out).toContain("web: warning: its required checks (ci/build) must also run on merge_group");
+        expect(out).toContain("web: warning: it requires 1 approving review: setup would leave its pull request open for you");
+        expect(out).toContain("To undo setup: delete the qq-main and qq-reserved-tags rulesets");
         expect(out).toContain("Nothing was changed.");
       } finally {
         cli.proc.kill();
@@ -108,6 +114,7 @@ test("a page without the key gets nothing from the API", async ({ browser }) => 
     const bare = cli.url.replace(/#.*/, "");
     await page.goto(bare);
     await expect(page.getByText("Open this page from your terminal")).toBeVisible();
+    await expect(page.getByText("npx --allow-git=root github:quirq-ai/setup#<commit>")).toBeVisible();
     const res = await page.request.get(`${bare}api/state`);
     expect(res.status()).toBe(403);
     expect(await res.text()).not.toContain("acme-labs");

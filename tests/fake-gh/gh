@@ -21,7 +21,7 @@ const routes = {
     repo("billing-api"), repo("web"), repo("marketing-site"), repo("ios-app"),
     repo("old-thing", { archived: true }), repo("secret-sauce", { visibility: "private" }), repo("empty"),
   ],
-  "repos/acme-labs/billing-api/contents/?ref=main": files("requirements.txt", "requirements-dev.txt", "app.py"),
+  "repos/acme-labs/billing-api/contents/?ref=main": [...files("requirements.txt", "requirements-dev.txt", "app.py"), { name: "tests", type: "dir" }],
   "repos/acme-labs/billing-api/contents/requirements-dev.txt?ref=main": { encoding: "base64", content: Buffer.from("-r requirements.txt\npytest==8.4.2\n").toString("base64") },
   "repos/acme-labs/web/contents/?ref=main": [...files("package.json", "pnpm-lock.yaml"), { name: "infra", type: "dir" }],
   "repos/acme-labs/web/contents/package.json?ref=main": { encoding: "base64", content: b64({ dependencies: { next: "16.3.8" }, scripts: { build: "next build", typecheck: "tsc --noEmit" } }) },
@@ -29,6 +29,15 @@ const routes = {
   "repos/acme-labs/marketing-site/contents/?ref=main": files("package.json", "package-lock.json"),
   "repos/acme-labs/marketing-site/contents/package.json?ref=main": { encoding: "base64", content: b64({ dependencies: { next: "16.3.8" } }) },
   "repos/acme-labs/ios-app/contents/?ref=main": files("Package.swift"),
+  // What already guards the repos the e2e test picks: billing-api has nothing, web has old protection.
+  "repos/acme-labs/billing-api": repo("billing-api", { allow_squash_merge: true }),
+  "repos/acme-labs/billing-api/rulesets?includes_parents=true": [],
+  "repos/acme-labs/web": repo("web", { allow_squash_merge: true }),
+  "repos/acme-labs/web/rulesets?includes_parents=true": [{ id: 7, name: "release-freeze" }],
+  "repos/acme-labs/web/branches/main/protection": {
+    required_status_checks: { contexts: ["ci/build"], checks: [{ context: "ci/build" }] },
+    required_pull_request_reviews: { required_approving_review_count: 1 },
+  },
   // An old repo past the 100 the form lists: only a direct GET finds it.
   "repos/acme-labs/old-archive-2019": { name: "old-archive-2019" },
 };
