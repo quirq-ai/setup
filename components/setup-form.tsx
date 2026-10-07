@@ -161,8 +161,9 @@ export function SetupForm() {
   }
 
   const repoForTools = normalizeRepo(workRepo);
+  // Blank means "no repo"; anything else (".git", a bare github.com link) must name one.
   const workRepoError =
-    repoForTools && !isRepo(repoForTools) ? "Write it as owner/name, like quirq-ai/innernet." : null;
+    workRepo.trim() && !isRepo(repoForTools) ? "Write it as owner/name, like quirq-ai/innernet." : null;
 
   async function sendTools() {
     if (!key) return;
@@ -229,7 +230,10 @@ export function SetupForm() {
                   aria-describedby="mode-repos-what"
                 />
                 <div className="flex flex-col gap-0.5">
-                  <Label htmlFor="mode-repos">Set up repos in an org I own</Label>
+                  {/* Only the label dims: the line under it is the explanation. */}
+                  <Label htmlFor="mode-repos" className={ownsAnOrg ? undefined : "opacity-50"}>
+                    Set up repos in an org I own
+                  </Label>
                   <span id="mode-repos-what" className="text-sm text-muted-foreground">
                     {ownsAnOrg
                       ? "Pick the org and repos. The terminal shows the plan."
@@ -450,33 +454,41 @@ export function SetupForm() {
   );
 }
 
-function Command({ children }: { children: string }) {
-  const [copied, setCopied] = useState(false);
+function Command({ children, label }: { children: string; label: string }) {
+  const [copied, setCopied] = useState<"yes" | "failed" | null>(null);
   return (
-    <div className="flex items-start gap-2">
-      {/* One line that scrolls inside the block: wrapping would split words at hyphens (~/qq-|tools). */}
-      <pre
-        tabIndex={0}
-        className="min-w-0 flex-1 overflow-x-auto rounded-md border border-border bg-muted px-3 py-2 font-mono text-sm whitespace-pre"
-      >
-        {children}
-      </pre>
-      <Button
-        variant="outline"
-        size="icon"
-        aria-label={copied ? "Copied" : "Copy command"}
-        onClick={() => {
-          navigator.clipboard.writeText(children).then(
-            () => {
-              setCopied(true);
-              setTimeout(() => setCopied(false), 2000);
-            },
-            () => setCopied(false),
-          );
-        }}
-      >
-        {copied ? <Check aria-hidden /> : <Copy aria-hidden />}
-      </Button>
+    <div className="flex flex-col gap-1">
+      <div className="flex items-start gap-2">
+        {/* One line that scrolls inside the block: wrapping would split words at hyphens (~/qq-|tools). */}
+        <pre
+          tabIndex={0}
+          aria-label={label}
+          className="min-w-0 flex-1 overflow-x-auto rounded-md border border-border bg-muted px-3 py-2 font-mono text-sm whitespace-pre outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        >
+          {children}
+        </pre>
+        <Button
+          variant="outline"
+          size="icon"
+          aria-label={copied === "yes" ? `Copied: ${label}` : `Copy: ${label}`}
+          onClick={() => {
+            navigator.clipboard.writeText(children).then(
+              () => {
+                setCopied("yes");
+                setTimeout(() => setCopied(null), 2000);
+              },
+              () => setCopied("failed"),
+            );
+          }}
+        >
+          {copied === "yes" ? <Check aria-hidden /> : <Copy aria-hidden />}
+        </Button>
+      </div>
+      {copied === "failed" && (
+        <p role="alert" className="text-sm text-destructive">
+          Could not copy. Select the command and copy it yourself.
+        </p>
+      )}
     </div>
   );
 }
@@ -508,7 +520,7 @@ function ToolsSteps(props: {
           {tools.install.map((s) => (
             <div key={s.what} className="flex flex-col gap-2">
               <p className="text-sm">{s.what}</p>
-              <Command>{s.cmd}</Command>
+              <Command label={s.what.replace(/ \(.*$/, "")}>{s.cmd}</Command>
             </div>
           ))}
           <p className="text-sm text-muted-foreground">Needs {tools.needs}</p>
@@ -542,17 +554,19 @@ function ToolsSteps(props: {
               </p>
             )}
           </div>
-          <Command>{getRepoLine}</Command>
+          <Command label={mac ? "Clone the repo" : "Get the repo"}>{getRepoLine}</Command>
           {mac && <p className="text-sm text-muted-foreground">{tools.mac}</p>}
-          <ul className="flex flex-col gap-1 text-sm">
-            {tools.use.map((u) => (
-              <li key={u.cmd}>
-                <code className="font-mono">{u.cmd}</code>
-                <span className="text-muted-foreground">: {u.what}</span>
-              </li>
-            ))}
-          </ul>
-          <p className="text-sm text-muted-foreground">{tools.useNote}</p>
+          {tools.use.length > 0 && (
+            <ul className="flex flex-col gap-1 text-sm">
+              {tools.use.map((u) => (
+                <li key={u.cmd}>
+                  <code className="font-mono">{u.cmd}</code>
+                  <span className="text-muted-foreground">: {u.what}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {tools.useNote && <p className="text-sm text-muted-foreground">{tools.useNote}</p>}
           <p className="text-sm text-muted-foreground">{tools.access}</p>
         </CardContent>
       </Card>

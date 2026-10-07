@@ -313,7 +313,10 @@ test("toolsText: install commands, then the line that gets the repo for this pla
   const mac = toolsText("quirq-ai/innernet", "darwin").join("\n");
   assert.match(mac, /git clone https:\/\/github\.com\/quirq-ai\/innernet\n/);
   assert.doesNotMatch(mac, /qq fetch https/);
-  assert.match(mac, /no pin for platform/);
+  assert.match(mac, /need Linux x86_64 for now/);
+  // On a Mac nothing is listed that fails there.
+  assert.doesNotMatch(mac, /Inside it|^ +qq (sync|build|test|run)/m);
+  assert.match(linux, /Inside it:\n +qq sync/);
   assert.equal(getLine(null, "linux"), "qq fetch https://github.com/OWNER/NAME");
   // zsh-safe: no comment or history characters in anything a person pastes.
   for (const s of INSTALL) assert.doesNotMatch(s.cmd, /[#!]/);
@@ -332,7 +335,10 @@ async function runCli() {
     const t = setTimeout(() => fail(new Error(`no link from the CLI:\n${out}`)), 15_000);
     proc.stdout.on("data", () => {
       const m = /http:\/\/127\.0\.0\.1:(\d+)\/#key=([A-Za-z0-9_-]+)/.exec(out);
-      if (m) clearTimeout(t), ok({ port: Number(m[1]), key: m[2] });
+      if (m) {
+        clearTimeout(t);
+        ok({ port: Number(m[1]), key: m[2] });
+      }
     });
   });
   return { proc, ...url, output: () => out, exited };

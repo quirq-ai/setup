@@ -1,21 +1,22 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { expect, test } from "@playwright/test";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const SHOTS = join(ROOT, "test-results", "screenshots");
 // The line that gets a repo: qq fetch, or git clone on a Mac, where qq fetch stops after cloning.
 const GET = process.platform === "darwin" ? "git clone" : "qq fetch";
+const AS_DARWIN = ["--import", pathToFileURL(join(ROOT, "tests", "e2e", "as-darwin.mjs")).href];
 
 type Cli = { proc: ChildProcess; url: string; output: () => string; exited: Promise<number | null> };
 
 /** Start the real CLI with the fake gh first on PATH and no token variables. */
-async function startCli(extra: Record<string, string> = {}): Promise<Cli> {
+async function startCli(extra: Record<string, string> = {}, nodeArgs: string[] = []): Promise<Cli> {
   const env: NodeJS.ProcessEnv = { ...process.env, PATH: `${join(ROOT, "tests", "fake-gh")}:${process.env.PATH}`, NO_COLOR: "1", ...extra };
   for (const v of ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"]) delete env[v];
-  const proc = spawn(process.execPath, [join(ROOT, "cli", "bin.mjs"), "--no-browser"], { env });
+  const proc = spawn(process.execPath, [...nodeArgs, join(ROOT, "cli", "bin.mjs"), "--no-browser"], { env });
   let out = "";
   proc.stdout!.on("data", (c) => (out += c));
   proc.stderr!.on("data", (c) => (out += c));
@@ -139,6 +140,10 @@ for (const scheme of ["light", "dark"] as const) {
         await expect(page.getByRole("radio", { name: /acme-labs/ })).toHaveCount(0);
         await expect(page.getByText("1. Install qq on this machine")).toBeVisible();
         await expect(page.getByText(/git clone -q https:\/\/github\.com\/quirq-ai\/depot/)).toBeVisible();
+        for (const notARepo of [".git", "https://github.com/"]) {
+          await page.getByLabel("Repo (optional)").fill(notARepo);
+          await expect(page.getByText("Write it as owner/name, like quirq-ai/innernet.")).toBeVisible();
+        }
         await page.getByLabel("Repo (optional)").fill("innernet");
         await expect(page.getByText("Write it as owner/name, like quirq-ai/innernet.")).toBeVisible();
         await expect(page.getByRole("button", { name: /Print these/ })).toBeDisabled();
@@ -198,14 +203,43 @@ test("each command has a copy button that copies it exactly", async ({ browser }
   try {
     await page.goto(cli.url);
     await page.getByRole("radio", { name: "Install qq on my machine and work on a repo" }).check();
-    const first = page.getByRole("button", { name: "Copy command" }).first();
-    await first.click();
-    await expect(page.getByRole("button", { name: "Copied" })).toBeVisible();
+    for (const name of ["Copy: Install qq", "Copy: Install qqsync", "Copy: Put both on your PATH", "Copy: Get the repo"]) {
+      await expect(page.getByRole("button", { name, exact: true })).toHaveCount(1);
+    }
+    await page.getByRole("button", { name: "Copy: Install qq", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Copied: Install qq" })).toBeVisible();
     const copied = await page.evaluate(() => navigator.clipboard.readText());
     expect(copied).toBe(await page.locator("pre").first().innerText());
     expect(copied).toMatch(/^\( set -e; mkdir -p ~\/qq-tools; rm -rf ~\/qq-tools\/depot; git clone -q /);
   } finally {
     cli.proc.kill();
     await context.close();
+  }
+});
+
+test("on a Mac: git clone, the note beside it, and no command that fails there", async ({ browser }) => {
+  const cli = await startCli({}, AS_DARWIN);
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  try {
+    expect(cli.output()).toContain("macOS: setup works here.");
+    await page.goto(cli.url);
+    await page.getByRole("radio", { name: "Install qq on my machine and work on a repo" }).check();
+    await page.getByLabel("Repo (optional)").fill("quirq-ai/innernet");
+    await expect(page.getByText("git clone https://github.com/quirq-ai/innernet", { exact: true })).toBeVisible();
+    await expect(page.getByText(/need Linux x86_64 for now/)).toBeVisible();
+    await expect(page.getByText(/^qq fetch https/)).toHaveCount(0);
+    for (const cmd of ["qq sync", "qq build [TARGET]", "qq test [TARGET]", 'qq run "COMMAND"']) {
+      await expect(page.getByText(cmd, { exact: true })).toHaveCount(0);
+    }
+    mkdirSync(SHOTS, { recursive: true });
+    await page.screenshot({ path: join(SHOTS, "tools-390-mac.png"), fullPage: true });
+    await page.getByRole("button", { name: /Print these/ }).click();
+    expect(await cli.exited).toBe(0);
+    const out = cli.output();
+    expect(out).toContain("     git clone https://github.com/quirq-ai/innernet\n");
+    expect(out).not.toMatch(/qq fetch https|Inside it:/);
+  } finally {
+    cli.proc.kill();
+    await page.close();
   }
 });

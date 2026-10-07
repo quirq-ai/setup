@@ -63,8 +63,9 @@ request from the form for 30 minutes), 2 error. Ctrl-C stops it by signal, which
 - The form server listens on `127.0.0.1` only, answers only requests whose `Host` is exactly that
   address (no DNS rebinding), and answers `/api/*` only with the one-time key from the printed link.
   The key is in the link's `#fragment`, which browsers never send to a server.
-- The page receives only names the command already read (orgs, repos, kinds), never a token. Its
-  answers are checked against those names before the terminal uses them.
+- The page receives only names the command already read (orgs, repos, kinds), your platform name
+  and the fixed text of the install path, never a token. Its answers are checked against those
+  names before the terminal uses them.
 - No telemetry. The page loads nothing from the internet (no web fonts, strict CSP).
 
 ## On a Mac
@@ -72,8 +73,9 @@ request from the form for 30 minutes), 2 error. Ctrl-C stops it by signal, which
 It works the same. macOS ships Python 3.9, so the later setup step needs a newer one
 (`brew install python@3.14`), as does installing qq. qq fetches toolchains for Linux x86_64 only, so
 on a Mac `qq fetch` and `qq sync` stop with "no pin for platform": the form and terminal show
-`git clone` instead of `qq fetch` there, and you install a repo's pinned tools yourself
-(`qqsync show infra/repo.toml` lists them). CI runs on GitHub's Linux runners.
+`git clone` instead of `qq fetch` there and leave out `qq sync`, `qq build`, `qq test` and `qq run`,
+which need Linux x86_64 for now; you use a repo's pinned tools yourself (`qqsync show
+infra/repo.toml` lists them). CI runs on GitHub's Linux runners.
 
 ## Develop
 

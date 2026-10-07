@@ -37,12 +37,21 @@ export const NEEDS = "git and python3 3.11.4 or newer with its venv module (Debi
 
 /** One statement about macOS, shared with preflight so the terminal never says two things. */
 export const MAC =
-  "qq fetches toolchains for Linux x86_64 only. On a Mac, qq fetch and qq sync stop with \"no pin for platform\", " +
-  "so clone with git and install the repo's pinned tools yourself (qqsync show infra/repo.toml lists them).";
+  "qq fetches toolchains for Linux x86_64 only, so on a Mac qq fetch, qq sync, qq build, qq test and qq run need " +
+  "Linux x86_64 for now: clone with git and use the repo's pinned tools yourself (qqsync show infra/repo.toml lists them).";
+
+/**
+ * What to list inside the repo on this platform: nothing on a Mac, where those commands need Linux.
+ * The page and the terminal both use this, so they always say the same thing.
+ * @param {string} platform  process.platform
+ */
+export function commandsFor(platform) {
+  return platform === "darwin" ? { use: [], useNote: null } : { use: USE, useNote: USE_NOTE };
+}
 
 export const ACCESS =
   "To push branches to a repo and open pull requests from them, an owner gives you Write access: the repo's " +
-  "Settings > Collaborators and teams, or an org team with Write on it. Without that, fork it on GitHub and work on your fork.";
+  "Settings > Collaborators & teams, or an org team with Write on it. Without that, fork it on GitHub and work on your fork.";
 
 /**
  * The line that gets the repo: qq fetch, except on a Mac, where it stops after cloning.
@@ -93,10 +102,15 @@ export function toolsText(repo, platform) {
     `     ${getLine(repo, platform)}`,
     ...(platform === "darwin" ? [MAC] : []),
     "",
-    "Inside it:",
-    ...USE.map((u) => `     ${u.cmd.padEnd(20)} ${u.what}`),
-    USE_NOTE,
-    "",
+    ...inside(platform),
+    ...(commandsFor(platform).use.length ? [""] : []),
     ACCESS,
   ];
+}
+
+/** @param {string} platform @returns {string[]} */
+function inside(platform) {
+  const { use, useNote } = commandsFor(platform);
+  if (!use.length) return [];
+  return ["Inside it:", ...use.map((u) => `     ${u.cmd.padEnd(20)} ${u.what}`), ...(useNote ? [useNote] : [])];
 }
