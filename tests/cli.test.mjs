@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
@@ -255,15 +256,25 @@ test("protectionWarnings: clean, unknown never reads as clean, and classic prote
 test("listRepos: quirq-ai's own tool repos are named as part of qq, and an empty reason is explained", async () => {
   const fakeGh = fileURLToPath(new URL("./fake-gh", import.meta.url));
   const saved = process.env.PATH;
+  const log = join(mkdtempSync(join(tmpdir(), "qq-setup-test-")), "calls.log");
   process.env.PATH = `${fakeGh}${delimiter}${saved}`;
+  process.env.FAKE_GH_LOG = log;
   try {
     const { repos } = await listRepos("quirq-ai");
     const by = Object.fromEntries(repos.map((r) => [r.name, r]));
-    assert.equal(by.gate.usable, false);
-    assert.match(by.gate.reason ?? "", /^part of qq itself/);
+    for (const name of ["gate", "Release"]) { // names compare ignoring case, as GitHub's do
+      assert.equal(by[name].usable, false);
+      assert.equal(by[name].onQq, false);
+      assert.match(by[name].reason ?? "", /^part of qq itself/);
+    }
     assert.equal(by["Gate-notes"].reason, "empty repo"); // only the exact tool names, never a lookalike
     assert.match(by["ios-app"].notes[0], /^no requirements\.txt/);
+    const calls = readFileSync(log, "utf8").split("\n").filter(Boolean);
+    assert.ok(calls.some((c) => c.startsWith("repos/quirq-ai/ios-app/")), "the log records reads");
+    assert.deepEqual(calls.filter((c) => /^repos\/quirq-ai\/(gate|release)(\/|$)/i.test(c)), []); // never read
   } finally {
     process.env.PATH = saved;
+    delete process.env.FAKE_GH_LOG;
+    rmSync(dirname(log), { recursive: true, force: true });
   }
 });

@@ -7,7 +7,8 @@ import { encodeRef, getAll, getJson, isName, GhError } from "./gh.mjs";
 
 /**
  * qq's own repos in quirq-ai: the tools qq is made of (infra-config's 13 infra repos) and this
- * command. They run qq's CI already, so setup never offers them.
+ * command. They are not set up through this form, so setup never offers them. Names compare in
+ * lower case, as GitHub's do.
  */
 export const QQ_OWN_REPOS = new Set(["depot", "sync", "recipes", "infra-config", "test-pipelines", "gate",
   "toolchains", "remote-build", "gardener", "rollers", "release", "installer", "perf", "setup"]);
@@ -72,8 +73,9 @@ async function describeRepo(org, r) {
     fork: Boolean(r.fork),
     defaultBranch: String(r.default_branch ?? "main"),
   };
-  if (org.toLowerCase() === "quirq-ai" && QQ_OWN_REPOS.has(base.name)) {
-    return { ...base, kinds: [], onQq: true, usable: false, reason: "part of qq itself: it already runs qq's own CI", notes: [] };
+  if (org.toLowerCase() === "quirq-ai" && QQ_OWN_REPOS.has(base.name.toLowerCase())) {
+    return { ...base, kinds: [], onQq: false, usable: false, notes: [],
+      reason: "part of qq itself: qq's own tool repos are not set up through this form" };
   }
   if (base.archived) return { ...base, kinds: [], onQq: false, usable: false, reason: "archived", notes: [] };
   if (base.visibility !== "public") {
