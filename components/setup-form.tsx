@@ -22,19 +22,11 @@ import {
   type State,
   type Tools,
 } from "@/lib/api";
+import { isBlankRepo, parseRepo } from "@/cli/names.mjs";
 
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 
 type Mode = "repos" | "tools";
-
-// As cli/tools.mjs normalizeRepo and isName: owner/name, a pasted github.com link, a trailing .git or /.
-function normalizeRepo(v: string) {
-  return v.replace(/^ +| +$/g, "").replace(/^https:\/\/github\.com\//i, "").replace(/\/$/, "").replace(/\.git$/, "");
-}
-function isRepo(v: string) {
-  const parts = v.split("/");
-  return parts.length === 2 && parts.every((p) => NAME_RE.test(p) && !p.endsWith(".git"));
-}
 
 // The key lives in the fragment of the link the terminal printed. undefined while prerendering.
 function subscribeHash(onChange: () => void) {
@@ -160,17 +152,18 @@ export function SetupForm() {
     }
   }
 
-  const repoForTools = normalizeRepo(workRepo);
-  // Blank means "no repo"; anything else (".git", a bare github.com link) must name one.
+  // The same check the terminal runs (cli/names.mjs). Only spaces count as blank; anything else
+  // (".git", a bare github.com link, a tab) must name a repo.
+  const repoForTools = isBlankRepo(workRepo) ? null : parseRepo(workRepo);
   const workRepoError =
-    workRepo.trim() && !isRepo(repoForTools) ? "Write it as owner/name, like quirq-ai/innernet." : null;
+    !isBlankRepo(workRepo) && !repoForTools ? "Write it as owner/name, like quirq-ai/innernet." : null;
 
   async function sendTools() {
     if (!key) return;
     setSending(true);
     setError(null);
     try {
-      await api.submit(key, { mode: "tools", repo: repoForTools || null });
+      await api.submit(key, { mode: "tools", repo: repoForTools });
       setDone("tools");
     } catch (e) {
       setError((e as Error).message);
@@ -261,7 +254,7 @@ export function SetupForm() {
           mac={state.platform === "darwin"}
           error={error}
           repo={workRepo}
-          okRepo={repoForTools && !workRepoError ? repoForTools : null}
+          okRepo={repoForTools}
           repoError={workRepoError}
           onRepo={setWorkRepo}
           sending={sending}
@@ -462,8 +455,7 @@ function Command({ children, label }: { children: string; label: string }) {
         {/* One line that scrolls inside the block: wrapping would split words at hyphens (~/qq-|tools). */}
         <pre
           tabIndex={0}
-          aria-label={label}
-          className="min-w-0 flex-1 overflow-x-auto rounded-md border border-border bg-muted px-3 py-2 font-mono text-sm whitespace-pre outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          className="min-w-0 flex-1 overflow-x-auto rounded-md border border-border bg-muted px-3 py-2 font-mono text-sm whitespace-pre outline-hidden focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
         >
           {children}
         </pre>
@@ -517,6 +509,9 @@ function ToolsSteps(props: {
           <CardDescription>Run each command once. Each is safe to run again.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
+          <p className="text-sm text-muted-foreground">
+            Each command is one line: scroll it sideways, or use its copy button.
+          </p>
           {tools.install.map((s) => (
             <div key={s.what} className="flex flex-col gap-2">
               <p className="text-sm">{s.what}</p>
@@ -556,17 +551,15 @@ function ToolsSteps(props: {
           </div>
           <Command label={mac ? "Clone the repo" : "Get the repo"}>{getRepoLine}</Command>
           {mac && <p className="text-sm text-muted-foreground">{tools.mac}</p>}
-          {tools.use.length > 0 && (
-            <ul className="flex flex-col gap-1 text-sm">
-              {tools.use.map((u) => (
-                <li key={u.cmd}>
-                  <code className="font-mono">{u.cmd}</code>
-                  <span className="text-muted-foreground">: {u.what}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-          {tools.useNote && <p className="text-sm text-muted-foreground">{tools.useNote}</p>}
+          <ul className="flex flex-col gap-1 text-sm">
+            {tools.use.map((u) => (
+              <li key={u.cmd}>
+                <code className="font-mono">{u.cmd}</code>
+                <span className="text-muted-foreground">: {u.what}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="text-sm text-muted-foreground">{tools.useNote}</p>
           <p className="text-sm text-muted-foreground">{tools.access}</p>
         </CardContent>
       </Card>

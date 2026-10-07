@@ -26,17 +26,19 @@ opens no pull request, changes no setting and installs nothing. The version that
    `gh auth login` grants) and Python 3.11+ (the setup step will run infra-config's generator and
    gate). It notes that the setup step will also need the `workflow` scope, and how to remove it
    afterwards. It never asks for `admin:org`, `delete_repo` or `gist`. It refuses to run while
-   `GH_TOKEN` or `GITHUB_TOKEN` is set, so it only ever acts as your own `gh` login.
+   `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN` or `GITHUB_ENTERPRISE_TOKEN` is set, so it
+   only ever acts as your own `gh` login.
 2. **Opens a form** on `127.0.0.1` (link printed in the terminal; `--no-browser` only prints it).
    It asks what you want to do:
    - **Install qq on my machine and work on a repo.** The terminal prints the three commands from the
      [qq guide](https://docs.quirq.dev/docs/qq) that install `qq` and `qqsync` and put them on your
      `PATH`, then `qq fetch https://github.com/<owner>/<name>` for the repo you name (`git clone` on a Mac),
-     and what `qq sync`, `qq build`, `qq test` and `qq run` do. It runs none of them. To push
+     and what `qq sync`, `qq build`, `qq test` and `qq run` do (on a Mac, `qq build`, `qq test` and
+     `qq run`, with the caveat under "On a Mac"). It runs none of them. To push
      branches to the repo, an owner gives you Write access. A login that owns no org starts here.
    - **Set up repos in an org I own** (steps 3 and 4). You pick an org you own, the repos to put under qq and, optionally, a new starter repo.
    A repo is offered only when it can run its qq kind's commands as they are: Python service
-   (`requirements.txt`), pytest (`requirements-dev.txt` listing pytest), Next.js app (pnpm with
+   (`requirements.txt`), pytest (`requirements-dev.txt` listing pytest, and tests at the root), Next.js app (pnpm with
    `build` and `typecheck` scripts) or Gatsby site (pnpm with `build` and `test` scripts). Others
    are listed with the reason, including private repos: GitHub offers a merge queue on private repos
    only on Enterprise Cloud, so v0 sets up public repos only.
@@ -71,11 +73,14 @@ request from the form for 30 minutes), 2 error. Ctrl-C stops it by signal, which
 ## On a Mac
 
 It works the same. macOS ships Python 3.9, so the later setup step needs a newer one
-(`brew install python@3.14`), as does installing qq. qq fetches toolchains for Linux x86_64 only, so
-on a Mac `qq fetch` and `qq sync` stop with "no pin for platform": the form and terminal show
-`git clone` instead of `qq fetch` there and leave out `qq sync`, `qq build`, `qq test` and `qq run`,
-which need Linux x86_64 for now; you use a repo's pinned tools yourself (`qqsync show
-infra/repo.toml` lists them). CI runs on GitHub's Linux runners.
+(`brew install python@3.14`), as does installing qq. The form, the terminal and this section say the
+same thing: qq fetches toolchains for Linux x86_64 only, so on a Mac `qq fetch` and `qq sync` stop
+with "no pin for platform": clone with git and install the repo's pinned tools yourself
+(`qqsync show infra/repo.toml` lists them). `qq build` and `qq test` then use them, from
+`--toolchain NAME=ROOT` or your `PATH`, and still check the pinned versions; `qq run` uses your
+`PATH`. So on a Mac the form and terminal show `git clone` instead of `qq fetch`, leave out
+`qq sync`, and list `qq build`, `qq test` and `qq run`. See the
+[qq guide](https://docs.quirq.dev/docs/qq). CI runs on GitHub's Linux runners.
 
 ## Develop
 

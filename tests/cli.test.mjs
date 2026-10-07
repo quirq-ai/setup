@@ -15,7 +15,8 @@ import { buildPlan, checkAnswers } from "../cli/plan.mjs";
 import { checks } from "../cli/preflight.mjs";
 import { listRepos } from "../cli/facts.mjs";
 import { classicFromError, protectionWarnings } from "../cli/protection.mjs";
-import { checkTools, getLine, INSTALL, normalizeRepo, toolsText } from "../cli/tools.mjs";
+import { isBlankRepo, normalizeRepo, parseRepo } from "../cli/names.mjs";
+import { checkTools, commandsFor, getLine, INSTALL, toolsText } from "../cli/tools.mjs";
 import { startServer } from "../cli/server.mjs";
 
 test("detectKinds offers a kind only when kinds.toml's stand-in commands will run", () => {
@@ -60,7 +61,7 @@ test("ghEnv never passes a token variable or a host override to gh", () => {
 test("isName and encodeRef keep API paths to safe characters", () => {
   assert.ok(isName("quirq-ai"));
   assert.ok(isName("my.repo_1"));
-  for (const bad of ["", "../x", "a/b", "-x", "x.git", "a b", "a?b", 3]) assert.ok(!isName(bad), String(bad));
+  for (const bad of ["", "../x", "a/b", "-x", "x.git", "x.GIT", "a b", "a?b", 3]) assert.ok(!isName(bad), String(bad));
   assert.equal(encodeRef("feature/x(1)"), "feature%2Fx%281%29");
 });
 
@@ -149,7 +150,7 @@ test("preflight checks: token variables, scopes, Python and macOS", () => {
   const mac = checks({ ...base, platform: "darwin", python: "Python 3.9.6" });
   assert.match(mac.find((c) => c.name === "Python 3.11+")?.detail ?? "", /brew install python@3\.14/);
   assert.equal(mac.find((c) => c.name === "Python 3.11+")?.fatal, false);
-  assert.match(mac.find((c) => c.name === "macOS")?.detail ?? "", /Linux x86_64 only.*clone with git/);
+  assert.match(mac.find((c) => c.name === "macOS")?.detail ?? "", /Linux x86_64 only.*no pin for platform.*clone with git.*--toolchain NAME=ROOT/);
 
   assert.equal(checks({ ...base, node: "v20.11.0" })[0].ok, false);
   const out = checks({ ...base, login: null, loginError: "not logged in" }).find((c) => c.name === "gh login");
@@ -293,8 +294,16 @@ test("checkTools: only mode and an owner/name repo get through", () => {
   assert.equal(normalizeRepo("http://github.com/a/b"), "http://github.com/a/b"); // only https is unwrapped
   const refused = ["innernet", "a/b/c", "../x", "a/-b", "a b/c", "a/b;rm", "$(id)/x", "a/b.git.git",
     "a/b\r", "a\n/b", "a/b\r\nevil", "a/b\u001b[31m", "a/b\u0000", "a/b%0a",
+    "\tquirq-ai/innernet", "quirq-ai/innernet\t", "\u00a0quirq-ai/innernet", "\u3000quirq-ai/innernet",
     "q‐ai/x", "а/b", "ｑ/b", "a/b​", "https://evil.example/a/b", "http://github.com/a/b", 7, true, ["a/b"]];
   for (const repo of refused) assert.equal(checkTools({ mode: "tools", repo }).ok, false, JSON.stringify(repo));
+  // Blank is spaces only, the same rule the form uses (cli/names.mjs): a tab or NBSP alone is refused.
+  for (const blank of ["", " ", "   "]) assert.ok(isBlankRepo(blank) && checkTools({ mode: "tools", repo: blank }).ok);
+  for (const notBlank of ["\t", "\u00a0", "\u3000", "\n"]) {
+    assert.equal(isBlankRepo(notBlank), false);
+    assert.equal(parseRepo(notBlank), null);
+    assert.equal(checkTools({ mode: "tools", repo: notBlank }).ok, false, JSON.stringify(notBlank));
+  }
   assert.equal(checkTools({ mode: "tools", repo: null, org: "acme" }).ok, false);
   assert.equal(checkTools({ mode: "repos" }).ok, false);
 });
@@ -313,10 +322,15 @@ test("toolsText: install commands, then the line that gets the repo for this pla
   const mac = toolsText("quirq-ai/innernet", "darwin").join("\n");
   assert.match(mac, /git clone https:\/\/github\.com\/quirq-ai\/innernet\n/);
   assert.doesNotMatch(mac, /qq fetch https/);
-  assert.match(mac, /need Linux x86_64 for now/);
-  // On a Mac nothing is listed that fails there.
-  assert.doesNotMatch(mac, /Inside it|^ +qq (sync|build|test|run)/m);
+  assert.match(mac, /stop with "no pin for platform"/);
+  assert.match(mac, /--toolchain NAME=ROOT or your PATH, and still check the pinned versions; qq run uses your PATH/);
+  // On a Mac, qq sync stops, so it is not listed; build, test and run are, with the note.
+  assert.doesNotMatch(mac, /^ +qq sync/m);
+  assert.match(mac, /Inside it:\n +qq build/);
+  assert.match(mac, /^ +qq run "COMMAND" +.*your PATH$/m);
   assert.match(linux, /Inside it:\n +qq sync/);
+  for (const p of ["darwin", "linux"]) assert.ok(commandsFor(p).useNote);
+  assert.ok(commandsFor("darwin").use.every((u) => !u.cmd.startsWith("qq sync")));
   assert.equal(getLine(null, "linux"), "qq fetch https://github.com/OWNER/NAME");
   // zsh-safe: no comment or history characters in anything a person pastes.
   for (const s of INSTALL) assert.doesNotMatch(s.cmd, /[#!]/);
