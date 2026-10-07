@@ -6,6 +6,8 @@ import { expect, test } from "@playwright/test";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const SHOTS = join(ROOT, "test-results", "screenshots");
+// The line that gets a repo: qq fetch, or git clone on a Mac, where qq fetch stops after cloning.
+const GET = process.platform === "darwin" ? "git clone" : "qq fetch";
 
 type Cli = { proc: ChildProcess; url: string; output: () => string; exited: Promise<number | null> };
 
@@ -142,7 +144,7 @@ for (const scheme of ["light", "dark"] as const) {
         await expect(page.getByRole("button", { name: /Print these/ })).toBeDisabled();
         // A pasted link with .git is taken as the owner/name it names.
         await page.getByLabel("Repo (optional)").fill("https://github.com/quirq-ai/innernet.git");
-        await expect(page.getByText("qq fetch https://github.com/quirq-ai/innernet", { exact: true })).toBeVisible();
+        await expect(page.getByText(`${GET} https://github.com/quirq-ai/innernet`, { exact: true })).toBeVisible();
         await expect(page.getByText("Write it as owner/name", { exact: false })).toHaveCount(0);
         // Commands never wrap, so no word is split: each block scrolls on its own, the page does not.
         for (const pre of await page.locator("pre").all()) {
@@ -160,7 +162,7 @@ for (const scheme of ["light", "dark"] as const) {
         expect(await cli.exited).toBe(0);
         const out = cli.output();
         expect(out).toContain("Install qq on this machine. Run each command once:");
-        expect(out).toContain("qq fetch https://github.com/quirq-ai/innernet");
+        expect(out).toContain(`${GET} https://github.com/quirq-ai/innernet`);
         expect(out).toContain("Nothing was installed.");
         expect(out).not.toContain("Plan for");
       } finally {
@@ -182,7 +184,7 @@ test("a login that owns no org starts on the install commands", async ({ browser
     await expect(page.getByRole("radio", { name: "Set up repos in an org I own" })).toBeDisabled();
     await page.getByRole("button", { name: /Print these/ }).click();
     expect(await cli.exited).toBe(0);
-    expect(cli.output()).toContain("qq fetch https://github.com/OWNER/NAME");
+    expect(cli.output()).toContain(`${GET} https://github.com/OWNER/NAME`);
   } finally {
     cli.proc.kill();
     await page.close();

@@ -354,7 +354,8 @@ test("cli: a body with mode never reaches the repos check, and a tools answer is
     assert.equal(again.status, 409);
     assert.equal((await post({ org: "acme-labs", repos: ["billing-api"], starter: null })).status, 409);
     assert.equal(await cli.exited, 0);
-    assert.match(cli.output(), /qq fetch https:\/\/github\.com\/quirq-ai\/innernet\n/);
+    // The CLI prints the line for the machine it runs on (CI runs this on macOS too).
+    assert.ok(cli.output().includes(`${getLine("quirq-ai/innernet", process.platform)}\n`));
     assert.doesNotMatch(cli.output(), /Plan for/);
   } finally {
     cli.proc.kill();
