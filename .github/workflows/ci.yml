@@ -54,8 +54,8 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  # What `npx --allow-git=root github:quirq-ai/setup#<commit>` runs: the package with its committed form and no install
-  # scripts, on Linux and macOS, Node 22 and 24.
+  # What `npx --allow-remote=root https://codeload.github.com/quirq-ai/setup/tar.gz/<commit>` runs: the
+  # package with its committed form and no install scripts, on Linux and macOS, Node 22 (npm 10) and 24.
   package:
     strategy:
       fail-fast: false
@@ -98,16 +98,23 @@ jobs:
           dir=$(mktemp -d)
           (cd "$dir" && npm install --silent --ignore-scripts --no-audit --no-fund "$GITHUB_WORKSPACE/$tgz" && npx --no-install qq-setup --version)
 
-      # npm 12 refuses git sources unless --allow-git=root is passed; one cell runs it on npm 12.
+      # npm 12 refuses tarball links unless --allow-remote=root is passed; one cell runs it on npm 12.
       - name: Use npm 12
         if: ${{ matrix.os == 'ubuntu-24.04' && matrix.node == 24 }}
         run: npm install --global npm@12
 
-      - name: Run the CLI from git, as the README says
+      # The README's command fetches GitHub's tarball of a commit (git archive with a setup-<sha>/
+      # prefix) over HTTP. Serve the same archive locally and run it the same way.
+      - name: Run the CLI from a tarball link, as the README says
         shell: bash
         run: |
           set -euo pipefail
           npm --version
           sha=$(git rev-parse HEAD)
+          www=$(mktemp -d)
+          git archive --format=tar.gz --prefix="setup-$sha/" -o "$www/$sha" HEAD
+          python3 -m http.server 8731 --bind 127.0.0.1 --directory "$www" >/dev/null 2>&1 &
+          trap 'kill $!' EXIT
+          for _ in 1 2 3 4 5 6 7 8 9 10; do curl -sf -o /dev/null "http://127.0.0.1:8731/$sha" && break; sleep 1; done
           dir=$(mktemp -d)
-          (cd "$dir" && npx --yes --allow-git=root "git+file://$GITHUB_WORKSPACE#$sha" --version)
+          (cd "$dir" && npx --yes --allow-remote=root "http://127.0.0.1:8731/$sha" --version)

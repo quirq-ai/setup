@@ -4,14 +4,16 @@ One command to set up quirq infra (qq) for your GitHub org: the terminal checks 
 form in your browser asks which org and repos, and the terminal shows what it will do.
 
 ```sh
-npx --allow-git=root github:quirq-ai/setup#<commit>
+npx --allow-remote=root https://codeload.github.com/quirq-ai/setup/tar.gz/<commit>
 ```
 
 `<commit>` is the full id of the latest commit on
-[`main`](https://github.com/quirq-ai/setup/commits/main). Always pin it: without one, npx runs
-whatever the default branch holds at that moment, with your GitHub login. `--allow-git=root` lets
-npm run a package straight from git, which npm 12 refuses without it (npm 10 and 11 accept the flag
-too).
+[`main`](https://github.com/quirq-ai/setup/commits/main). Always pin it: the link then serves
+exactly that commit, and nothing that lands on `main` later. npx downloads it as a tarball rather
+than through git, because npm 10's npx cannot run a package from a `github:` link ("GitFetcher
+requires an Arborist constructor"). `--allow-remote=root` lets npm run a package from a tarball
+link: npm 12 refuses one without it, and npm 10 and 11 ignore the flag, which is harmless here
+because the package has no dependencies.
 
 **This version only reads.** It shows the plan and stops: it creates no repo, opens no pull request
 and changes no setting. The version that carries the plan out comes next, after review.
