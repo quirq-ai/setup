@@ -116,10 +116,11 @@ jobs:
           sha=$(git rev-parse HEAD)
           www=$(mktemp -d)
           git archive --format=tar.gz --prefix="setup-$sha/" -o "$www/$sha" HEAD
-          python3 -m http.server 8731 --bind 127.0.0.1 --directory "$www" >/dev/null 2>&1 &
+          # A one-file server in node, which is already warm here (python3 can take over 30 s to start on macOS runners).
+          WWW="$www" node -e 'const fs = require("fs"), path = require("path"); require("http").createServer((q, s) => { const f = path.join(process.env.WWW, path.basename(q.url)); fs.readFile(f, (e, b) => { if (e) { s.writeHead(404); s.end(); } else { s.writeHead(200, { "content-type": "application/gzip" }); s.end(b); } }); }).listen(8731, "127.0.0.1")' &
           trap 'kill $!' EXIT
           up=
-          for _ in 1 2 3 4 5 6 7 8 9 10; do curl -sf -o /dev/null "http://127.0.0.1:8731/$sha" && { up=1; break; }; sleep 1; done
+          for _ in 1 2 3 4 5 6 7 8 9 10; do curl -sf --max-time 2 -o /dev/null "http://127.0.0.1:8731/$sha" && { up=1; break; }; sleep 1; done
           [ -n "$up" ] || { echo "::error::the local tarball server did not start"; exit 1; }
           dir=$(mktemp -d)
           (cd "$dir" && npx --yes --allow-remote=root "http://127.0.0.1:8731/$sha" --version)

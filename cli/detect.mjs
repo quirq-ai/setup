@@ -64,5 +64,8 @@ export function detectKinds(rootNames, files = {}) {
     else notes.push("Node project that is neither Next.js nor Gatsby: no qq kind yet");
   }
 
+  if (!kinds.length && !notes.length) {
+    notes.push("no requirements.txt, requirements-dev.txt or package.json at the root, which is what qq's kinds start from");
+  }
   return { kinds, onQq: !!files.hasManifest, notes };
 }
