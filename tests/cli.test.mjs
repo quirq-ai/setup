@@ -14,6 +14,7 @@ import { buildPlan, checkAnswers } from "../cli/plan.mjs";
 import { checks } from "../cli/preflight.mjs";
 import { listRepos } from "../cli/facts.mjs";
 import { classicFromError, protectionWarnings } from "../cli/protection.mjs";
+import { checkTools, INSTALL, toolsText } from "../cli/tools.mjs";
 import { startServer } from "../cli/server.mjs";
 
 test("detectKinds offers a kind only when kinds.toml's stand-in commands will run", () => {
@@ -277,4 +278,24 @@ test("listRepos: quirq-ai's own tool repos are named as part of qq, and an empty
     delete process.env.FAKE_GH_LOG;
     rmSync(dirname(log), { recursive: true, force: true });
   }
+});
+
+test("checkTools: only mode and an owner/name repo get through", () => {
+  assert.deepEqual(checkTools({ mode: "tools", repo: null }), { ok: true, repo: null });
+  assert.deepEqual(checkTools({ mode: "tools", repo: "" }), { ok: true, repo: null });
+  assert.deepEqual(checkTools({ mode: "tools", repo: "quirq-ai/innernet" }), { ok: true, repo: "quirq-ai/innernet" });
+  for (const repo of ["innernet", "a/b/c", "../x", "a/-b", "a b/c", "a/b;rm", 7]) {
+    assert.equal(checkTools({ mode: "tools", repo }).ok, false, String(repo));
+  }
+  assert.equal(checkTools({ mode: "tools", repo: null, org: "acme" }).ok, false);
+  assert.equal(checkTools({ mode: "repos" }).ok, false);
+});
+
+test("toolsText: the guide's three install commands, then the fetch line for the repo", () => {
+  const text = toolsText("quirq-ai/innernet").join("\n");
+  for (const s of INSTALL) assert.ok(text.includes(s.cmd));
+  assert.match(text, /qq fetch https:\/\/github\.com\/quirq-ai\/innernet\n/);
+  assert.match(toolsText(null).join("\n"), /qq fetch https:\/\/github\.com\/OWNER\/NAME/);
+  // zsh-safe: no comment or history characters in anything a person pastes.
+  for (const s of INSTALL) assert.doesNotMatch(s.cmd, /[#!]/);
 });

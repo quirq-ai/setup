@@ -18,10 +18,17 @@ export type Repo = {
   notes: string[];
 };
 
-export type State = { version: string; readOnly: boolean; login: string; orgs: Org[] };
+export type Tools = {
+  install: { what: string; cmd: string }[];
+  use: { cmd: string; what: string }[];
+  needs: string;
+  access: string;
+};
+export type State = { version: string; readOnly: boolean; login: string; orgs: Org[]; tools: Tools };
 export type RepoList = { org: string; truncated: boolean; repos: Repo[] };
 export type StarterKind = "node-app" | "python-service";
 export type Answers = { org: string; repos: string[]; starter: null | { name: string; kind: StarterKind } };
+export type ToolsAnswer = { mode: "tools"; repo: string | null };
 
 export const KIND_LABELS: Record<Kind, string> = {
   "python-service": "Python service",
@@ -62,7 +69,7 @@ async function call<T>(key: string, path: string, init?: RequestInit): Promise<T
 export const api = {
   state: (key: string) => call<State>(key, "/api/state"),
   repos: (key: string, org: string) => call<RepoList>(key, `/api/repos?org=${encodeURIComponent(org)}`),
-  submit: (key: string, answers: Answers) =>
+  submit: (key: string, answers: Answers | ToolsAnswer) =>
     call<{ ok: true }>(key, "/api/answers", {
       method: "POST",
       headers: { "content-type": "application/json" },

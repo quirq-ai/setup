@@ -10,8 +10,8 @@ const SHOTS = join(ROOT, "test-results", "screenshots");
 type Cli = { proc: ChildProcess; url: string; output: () => string; exited: Promise<number | null> };
 
 /** Start the real CLI with the fake gh first on PATH and no token variables. */
-async function startCli(): Promise<Cli> {
-  const env: NodeJS.ProcessEnv = { ...process.env, PATH: `${join(ROOT, "tests", "fake-gh")}:${process.env.PATH}`, NO_COLOR: "1" };
+async function startCli(extra: Record<string, string> = {}): Promise<Cli> {
+  const env: NodeJS.ProcessEnv = { ...process.env, PATH: `${join(ROOT, "tests", "fake-gh")}:${process.env.PATH}`, NO_COLOR: "1", ...extra };
   for (const v of ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"]) delete env[v];
   const proc = spawn(process.execPath, [join(ROOT, "cli", "bin.mjs"), "--no-browser"], { env });
   let out = "";
@@ -119,6 +119,62 @@ test("a page without the key gets nothing from the API", async ({ browser }) => 
     const res = await page.request.get(`${bare}api/state`);
     expect(res.status()).toBe(403);
     expect(await res.text()).not.toContain("acme-labs");
+  } finally {
+    cli.proc.kill();
+    await page.close();
+  }
+});
+
+for (const scheme of ["light", "dark"] as const) {
+  for (const width of [390, 1280]) {
+    test(`tools ${width}px ${scheme}: the install and fetch commands print in the terminal`, async ({ browser }) => {
+      const cli = await startCli();
+      const page = await browser.newPage({ viewport: { width, height: width === 390 ? 844 : 800 }, colorScheme: scheme });
+      try {
+        await page.goto(cli.url);
+        await expect(page.getByRole("radio", { name: /acme-labs/ })).toBeChecked();
+        await page.getByRole("radio", { name: "Work on a repo that already uses qq" }).check();
+        await expect(page.getByRole("radio", { name: /acme-labs/ })).toHaveCount(0);
+        await expect(page.getByText("1. Install qq on this machine")).toBeVisible();
+        await expect(page.getByText(/git clone -q https:\/\/github\.com\/quirq-ai\/depot/)).toBeVisible();
+        await page.getByLabel("Repo (optional)").fill("innernet");
+        await expect(page.getByText("Write it as owner/name, like quirq-ai/innernet.")).toBeVisible();
+        await expect(page.getByRole("button", { name: /Print these/ })).toBeDisabled();
+        await page.getByLabel("Repo (optional)").fill("quirq-ai/innernet");
+        await expect(page.getByText("qq fetch https://github.com/quirq-ai/innernet")).toBeVisible();
+
+        const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+        expect(overflow).toBeLessThanOrEqual(0);
+        mkdirSync(SHOTS, { recursive: true });
+        await page.screenshot({ path: join(SHOTS, `tools-${width}-${scheme}.png`), fullPage: true });
+
+        await page.getByRole("button", { name: /Print these/ }).click();
+        await expect(page.getByText("qq-setup printed the commands there.", { exact: false })).toBeVisible();
+        expect(await cli.exited).toBe(0);
+        const out = cli.output();
+        expect(out).toContain("Install qq on this machine. Run each command once:");
+        expect(out).toContain("qq fetch https://github.com/quirq-ai/innernet");
+        expect(out).toContain("Nothing was installed.");
+        expect(out).not.toContain("Plan for");
+      } finally {
+        cli.proc.kill();
+        await page.close();
+      }
+    });
+  }
+}
+
+test("a login that owns no org starts on the install commands", async ({ browser }) => {
+  const cli = await startCli({ FAKE_GH_NO_ORGS: "1" });
+  const page = await browser.newPage();
+  try {
+    expect(cli.output()).toContain("owns no GitHub org, so the form can only show how to install qq");
+    await page.goto(cli.url);
+    await expect(page.getByRole("radio", { name: "Work on a repo that already uses qq" })).toBeChecked();
+    await expect(page.getByText(/You own no GitHub org yet/)).toBeVisible();
+    await page.getByRole("button", { name: /Print these/ }).click();
+    expect(await cli.exited).toBe(0);
+    expect(cli.output()).toContain("qq fetch https://github.com/OWNER/NAME");
   } finally {
     cli.proc.kill();
     await page.close();
