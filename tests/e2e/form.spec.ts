@@ -133,15 +133,22 @@ for (const scheme of ["light", "dark"] as const) {
       try {
         await page.goto(cli.url);
         await expect(page.getByRole("radio", { name: /acme-labs/ })).toBeChecked();
-        await page.getByRole("radio", { name: "Work on a repo that already uses qq" }).check();
+        await page.getByRole("radio", { name: "Install qq on my machine and work on a repo" }).check();
         await expect(page.getByRole("radio", { name: /acme-labs/ })).toHaveCount(0);
         await expect(page.getByText("1. Install qq on this machine")).toBeVisible();
         await expect(page.getByText(/git clone -q https:\/\/github\.com\/quirq-ai\/depot/)).toBeVisible();
         await page.getByLabel("Repo (optional)").fill("innernet");
         await expect(page.getByText("Write it as owner/name, like quirq-ai/innernet.")).toBeVisible();
         await expect(page.getByRole("button", { name: /Print these/ })).toBeDisabled();
-        await page.getByLabel("Repo (optional)").fill("quirq-ai/innernet");
-        await expect(page.getByText("qq fetch https://github.com/quirq-ai/innernet")).toBeVisible();
+        // A pasted link with .git is taken as the owner/name it names.
+        await page.getByLabel("Repo (optional)").fill("https://github.com/quirq-ai/innernet.git");
+        await expect(page.getByText("qq fetch https://github.com/quirq-ai/innernet", { exact: true })).toBeVisible();
+        await expect(page.getByText("Write it as owner/name", { exact: false })).toHaveCount(0);
+        // Commands never wrap, so no word is split: each block scrolls on its own, the page does not.
+        for (const pre of await page.locator("pre").all()) {
+          expect(await pre.evaluate((el) => getComputedStyle(el).whiteSpace)).toBe("pre");
+          expect(await pre.evaluate((el) => getComputedStyle(el).overflowX)).toBe("auto");
+        }
 
         const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
         expect(overflow).toBeLessThanOrEqual(0);
@@ -170,13 +177,33 @@ test("a login that owns no org starts on the install commands", async ({ browser
   try {
     expect(cli.output()).toContain("owns no GitHub org, so the form can only show how to install qq");
     await page.goto(cli.url);
-    await expect(page.getByRole("radio", { name: "Work on a repo that already uses qq" })).toBeChecked();
+    await expect(page.getByRole("radio", { name: "Install qq on my machine and work on a repo" })).toBeChecked();
     await expect(page.getByText(/You own no GitHub org yet/)).toBeVisible();
+    await expect(page.getByRole("radio", { name: "Set up repos in an org I own" })).toBeDisabled();
     await page.getByRole("button", { name: /Print these/ }).click();
     expect(await cli.exited).toBe(0);
     expect(cli.output()).toContain("qq fetch https://github.com/OWNER/NAME");
   } finally {
     cli.proc.kill();
     await page.close();
+  }
+});
+
+test("each command has a copy button that copies it exactly", async ({ browser }) => {
+  const cli = await startCli();
+  const context = await browser.newContext({ permissions: ["clipboard-read", "clipboard-write"] });
+  const page = await context.newPage();
+  try {
+    await page.goto(cli.url);
+    await page.getByRole("radio", { name: "Install qq on my machine and work on a repo" }).check();
+    const first = page.getByRole("button", { name: "Copy command" }).first();
+    await first.click();
+    await expect(page.getByRole("button", { name: "Copied" })).toBeVisible();
+    const copied = await page.evaluate(() => navigator.clipboard.readText());
+    expect(copied).toBe(await page.locator("pre").first().innerText());
+    expect(copied).toMatch(/^\( set -e; mkdir -p ~\/qq-tools; rm -rf ~\/qq-tools\/depot; git clone -q /);
+  } finally {
+    cli.proc.kill();
+    await context.close();
   }
 });

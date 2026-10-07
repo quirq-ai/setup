@@ -26,21 +26,41 @@ export const USE = [
   { cmd: "qq sync", what: "fetch the pinned toolchains and check their digests" },
   { cmd: "qq build [TARGET]", what: "install dependencies and build" },
   { cmd: "qq test [TARGET]", what: "build and test; results in .qq/out/results.json" },
-  { cmd: 'qq run "COMMAND"', what: "run a command from the repo root with the pinned toolchains first on PATH" },
+  { cmd: 'qq run "COMMAND"', what: "run a command once, from the repo root, with the pinned toolchains first on PATH" },
 ];
 
-export const NEEDS =
-  "git and python3 3.11.4 or newer with its venv module (Debian/Ubuntu: python3-venv). Toolchains are fetched for " +
-  "Linux x86_64 only: on a Mac, qq sync stops with \"no pin for platform\", so use git clone instead of qq fetch " +
-  "and install the pinned Python 3.14.8 or Node 24 yourself.";
+/** qq build and qq test hand off to a recipe for the repo's qq kind; not every kind has one yet. */
+export const USE_NOTE =
+  "qq build and qq test work where qq has a local recipe for the repo's kind; the repo's infra/repo.toml says when it has none.";
+
+export const NEEDS = "git and python3 3.11.4 or newer with its venv module (Debian/Ubuntu: python3-venv).";
+
+/** One statement about macOS, shared with preflight so the terminal never says two things. */
+export const MAC =
+  "qq fetches toolchains for Linux x86_64 only. On a Mac, qq fetch and qq sync stop with \"no pin for platform\", " +
+  "so clone with git and install the repo's pinned tools yourself (qqsync show infra/repo.toml lists them).";
 
 export const ACCESS =
-  "To push branches to a repo and open pull requests from them, an owner adds you as a collaborator " +
-  "(the repo's Settings > Collaborators) or to its org. Without that, fork it on GitHub and work on your fork.";
+  "To push branches to a repo and open pull requests from them, an owner gives you Write access: the repo's " +
+  "Settings > Collaborators and teams, or an org team with Write on it. Without that, fork it on GitHub and work on your fork.";
 
-/** @param {string | null} repo  "owner/name", already checked */
-export function fetchLine(repo) {
-  return `qq fetch https://github.com/${repo ?? "OWNER/NAME"}`;
+/**
+ * The line that gets the repo: qq fetch, except on a Mac, where it stops after cloning.
+ * @param {string | null} repo  "owner/name", already checked
+ * @param {string} platform  process.platform
+ */
+export function getLine(repo, platform) {
+  const url = `https://github.com/${repo ?? "OWNER/NAME"}`;
+  return platform === "darwin" ? `git clone ${url}` : `qq fetch ${url}`;
+}
+
+/**
+ * "owner/name", a pasted https://github.com/owner/name link, or either with a trailing ".git" or "/",
+ * as "owner/name". Anything else comes back unchanged, for checkTools to refuse.
+ * @param {string} v
+ */
+export function normalizeRepo(v) {
+  return v.replace(/^ +| +$/g, "").replace(/^https:\/\/github\.com\//i, "").replace(/\/$/, "").replace(/\.git$/, "");
 }
 
 /**
@@ -56,24 +76,26 @@ export function checkTools(body) {
   if (b.mode !== "tools") return { ok: false, error: "mode must be tools" };
   if (b.repo === null || b.repo === undefined || b.repo === "") return { ok: true, repo: null };
   if (typeof b.repo !== "string") return { ok: false, error: "repo must be owner/name" };
-  const parts = b.repo.split("/");
+  const repo = normalizeRepo(b.repo);
+  const parts = repo.split("/");
   if (parts.length !== 2 || !parts.every(isName)) return { ok: false, error: "repo must be owner/name, like quirq-ai/innernet" };
-  return { ok: true, repo: b.repo };
+  return { ok: true, repo };
 }
 
-/** The terminal's text for the tools path. @param {string | null} repo @returns {string[]} */
-export function toolsText(repo) {
+/** The terminal's text for the tools path. @param {string | null} repo @param {string} platform @returns {string[]} */
+export function toolsText(repo, platform) {
   return [
     "Install qq on this machine. Run each command once:",
     ...INSTALL.flatMap((s, i) => [`  ${i + 1}. ${s.what}:`, `     ${s.cmd}`]),
+    `Needs ${NEEDS}`,
     "",
     `Then get ${repo ?? "a repo that has infra/repo.toml"}:`,
-    `     ${fetchLine(repo)}`,
+    `     ${getLine(repo, platform)}`,
+    ...(platform === "darwin" ? [MAC] : []),
     "",
     "Inside it:",
     ...USE.map((u) => `     ${u.cmd.padEnd(20)} ${u.what}`),
-    "",
-    `Needs ${NEEDS}`,
+    USE_NOTE,
     "",
     ACCESS,
   ];

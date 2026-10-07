@@ -15,14 +15,14 @@ import { buildPlan, checkAnswers, CONFIG_REPO } from "./plan.mjs";
 import { preflight } from "./preflight.mjs";
 import { protectionWarnings, readProtection } from "./protection.mjs";
 import { startServer } from "./server.mjs";
-import { ACCESS, checkTools, INSTALL, NEEDS, toolsText, USE } from "./tools.mjs";
+import { ACCESS, checkTools, INSTALL, MAC, NEEDS, toolsText, USE, USE_NOTE } from "./tools.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
 // The form gives up after 30 minutes with no request from the page.
 const IDLE_MS = 30 * 60 * 1000;
 
-const HELP = `qq-setup: set up quirq infra (qq) for your GitHub org.
+const HELP = `qq-setup: set up quirq infra (qq) for your GitHub org, or install qq to work on a repo that uses it.
 
   npx --allow-remote=root https://codeload.github.com/quirq-ai/setup/tar.gz/<commit> [--no-browser] [--port N]
 
@@ -64,7 +64,7 @@ async function main(argv = process.argv.slice(2)) {
   if (argv.includes("--help") || argv.includes("-h")) return console.log(HELP), 0;
   if (argv.includes("--version")) return console.log(`qq-setup ${pkg.version}`), 0;
 
-  console.log(`${bold("qq-setup")} ${pkg.version}: sets up quirq infra (qq) for a GitHub org.`);
+  console.log(`${bold("qq-setup")} ${pkg.version}: sets up quirq infra (qq) for a GitHub org, or shows how to install qq.`);
   console.log("This version only reads from GitHub. Nothing is created or changed.\n");
 
   const results = await preflight();
@@ -103,7 +103,8 @@ async function main(argv = process.argv.slice(2)) {
     root: join(ROOT, "out"),
     port,
     handlers: {
-      state: async () => (touch(), { version: pkg.version, readOnly: true, login, orgs, tools: { install: INSTALL, use: USE, needs: NEEDS, access: ACCESS } }),
+      state: async () => (touch(), { version: pkg.version, readOnly: true, login, orgs, platform: process.platform,
+        tools: { install: INSTALL, use: USE, useNote: USE_NOTE, needs: NEEDS, mac: MAC, access: ACCESS } }),
       repos: async (org) => {
         touch();
         const o = orgs.find((x) => x.login === org);
@@ -157,7 +158,7 @@ async function main(argv = process.argv.slice(2)) {
 
   if ("tools" in answers) {
     console.log("");
-    for (const line of toolsText(answers.tools)) console.log(line);
+    for (const line of toolsText(answers.tools, process.platform)) console.log(line);
     console.log(`\n${bold("Nothing was installed.")} qq-setup only printed the commands; run them yourself.`);
     return 0;
   }

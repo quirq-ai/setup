@@ -29,11 +29,11 @@ opens no pull request, changes no setting and installs nothing. The version that
    `GH_TOKEN` or `GITHUB_TOKEN` is set, so it only ever acts as your own `gh` login.
 2. **Opens a form** on `127.0.0.1` (link printed in the terminal; `--no-browser` only prints it).
    It asks what you want to do:
-   - **Work on a repo that already uses qq.** The terminal prints the three commands from the
+   - **Install qq on my machine and work on a repo.** The terminal prints the three commands from the
      [qq guide](https://docs.quirq.dev/docs/qq) that install `qq` and `qqsync` and put them on your
-     `PATH`, then `qq fetch https://github.com/<owner>/<name>` for the repo you name, and what
-     `qq sync`, `qq build`, `qq test` and `qq run` do. It runs none of them. To push branches to the
-     repo, an owner adds you as a collaborator. A login that owns no org starts here.
+     `PATH`, then `qq fetch https://github.com/<owner>/<name>` for the repo you name (`git clone` on a Mac),
+     and what `qq sync`, `qq build`, `qq test` and `qq run` do. It runs none of them. To push
+     branches to the repo, an owner gives you Write access. A login that owns no org starts here.
    - **Set up repos in an org I own** (steps 3 and 4). You pick an org you own, the repos to put under qq and, optionally, a new starter repo.
    A repo is offered only when it can run its qq kind's commands as they are: Python service
    (`requirements.txt`), pytest (`requirements-dev.txt` listing pytest), Next.js app (pnpm with
@@ -70,8 +70,10 @@ request from the form for 30 minutes), 2 error. Ctrl-C stops it by signal, which
 ## On a Mac
 
 It works the same. macOS ships Python 3.9, so the later setup step needs a newer one
-(`brew install python@3.14`). After setup, `qq build` and `qq test` stay Linux-only, as qq's
-toolchains are; CI runs on GitHub's Linux runners.
+(`brew install python@3.14`), as does installing qq. qq fetches toolchains for Linux x86_64 only, so
+on a Mac `qq fetch` and `qq sync` stop with "no pin for platform": the form and terminal show
+`git clone` instead of `qq fetch` there, and you install a repo's pinned tools yourself
+(`qqsync show infra/repo.toml` lists them). CI runs on GitHub's Linux runners.
 
 ## Develop
 

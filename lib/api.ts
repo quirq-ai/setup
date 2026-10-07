@@ -21,10 +21,12 @@ export type Repo = {
 export type Tools = {
   install: { what: string; cmd: string }[];
   use: { cmd: string; what: string }[];
+  useNote: string;
   needs: string;
+  mac: string;
   access: string;
 };
-export type State = { version: string; readOnly: boolean; login: string; orgs: Org[]; tools: Tools };
+export type State = { version: string; readOnly: boolean; login: string; orgs: Org[]; platform: string; tools: Tools };
 export type RepoList = { org: string; truncated: boolean; repos: Repo[] };
 export type StarterKind = "node-app" | "python-service";
 export type Answers = { org: string; repos: string[]; starter: null | { name: string; kind: StarterKind } };
