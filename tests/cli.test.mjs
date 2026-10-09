@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { request } from "node:http";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
@@ -17,7 +17,7 @@ import { listRepos } from "../cli/facts.mjs";
 import { classicFromError, protectionWarnings } from "../cli/protection.mjs";
 import { isBlankRepo, normalizeRepo, parseRepo } from "../cli/names.mjs";
 import { checkTools, commandsFor, getLine, INSTALL, MAC, toolsText } from "../cli/tools.mjs";
-import { writeOpener } from "../cli/opener.mjs";
+import { openerBase, writeOpener } from "../cli/opener.mjs";
 import { startServer } from "../cli/server.mjs";
 
 test("detectKinds offers a kind only when kinds.toml's stand-in commands will run", () => {
@@ -191,7 +191,9 @@ async function openSession(port, key) {
   const res = await hit(port, { method: "POST", path: "/api/session", headers: { origin, "x-qq-setup": "1", "x-qq-setup-key": key } });
   assert.equal(res.status, 200, res.body);
   const set = String(res.headers["set-cookie"] ?? "");
-  return { set, headers: { origin, "x-qq-setup": "1", cookie: set.split(";")[0] } };
+  const { token } = JSON.parse(res.body);
+  assert.match(token, /^[A-Za-z0-9_-]{43}$/);
+  return { set, token, headers: { origin, "x-qq-setup": token, cookie: set.split(";")[0] } };
 }
 
 test("server: single-use key, session cookie, host, origin, body size and static files", async () => {
@@ -202,9 +204,11 @@ test("server: single-use key, session cookie, host, origin, body size and static
   /** @type {unknown[]} */
   const submitted = [];
   let sessions = 0;
+  let refused = 0;
   const srv = await startServer({
     root: join(root, "out"),
     onSession: () => sessions++,
+    onRefusedTrade: () => refused++,
     handlers: {
       state: async () => ({ hello: "world" }),
       repos: async (org) => ({ org }),
@@ -235,12 +239,22 @@ test("server: single-use key, session cookie, host, origin, body size and static
     assert.equal((await trade({ ...x, origin: "http://127.0.0.1:1", "x-qq-setup-key": srv.key })).status, 403);
     assert.equal((await trade({ ...x, origin, "x-qq-setup-key": "wrong" })).status, 403);
     assert.equal(sessions, 0);
-    const { set, headers: k } = await openSession(p, srv.key);
+    const { set, token, headers: k } = await openSession(p, srv.key);
     assert.equal(sessions, 1);
+    assert.equal(refused, 0);
     assert.match(set, new RegExp(`^qq_setup_${p}=[A-Za-z0-9_-]{43}; Path=/api; HttpOnly; SameSite=Strict$`));
     // Single-use: the same key again, from anyone, gets nothing.
     assert.equal((await trade({ ...x, origin, "x-qq-setup-key": srv.key })).status, 403);
     assert.equal(sessions, 1);
+    assert.equal(refused, 1);
+    // The cookie reaches every port on 127.0.0.1, so on its own it opens nothing: the token from the
+    // trade, kept in the tab's sessionStorage, is needed too. And the token alone opens nothing either.
+    assert.equal((await hit(p, { path: "/api/state", headers: { ...x, cookie: k.cookie } })).status, 401);
+    assert.equal((await hit(p, { path: "/api/state", headers: { "x-qq-setup": token } })).status, 401);
+    assert.equal((await hit(p, { path: "/api/state", headers: { ...k, "x-qq-setup": `${token}x` } })).status, 401);
+    // A same-named cookie set from another port and sent first does not lock the real page out.
+    const tossed = { ...k, cookie: `qq_setup_${p}=junk; ${k.cookie}` };
+    assert.equal((await hit(p, { path: "/api/state", headers: tossed })).status, 200);
 
     assert.equal((await hit(p, { path: "/api/state", headers: k })).body, JSON.stringify({ hello: "world" }));
     assert.equal((await hit(p, { path: "/api/state", headers: { cookie: k.cookie } })).status, 403); // no x-qq-setup
@@ -255,7 +269,7 @@ test("server: single-use key, session cookie, host, origin, body size and static
 
     const post = (/** @type {string} */ body, /** @type {Record<string, string>} */ h = {}) =>
       hit(p, { method: "POST", path: "/api/answers", headers: { ...k, "content-type": "application/json", ...h }, body });
-    const noOrigin = { "x-qq-setup": "1", cookie: k.cookie, "content-type": "application/json" };
+    const noOrigin = { "x-qq-setup": token, cookie: k.cookie, "content-type": "application/json" };
     assert.equal((await hit(p, { method: "POST", path: "/api/answers", headers: noOrigin, body: "{}" })).status, 403);
     assert.equal((await post("{}", { "content-type": "text/plain" })).status, 415);
     assert.equal((await post("not json")).status, 400);
@@ -381,8 +395,8 @@ test("toolsText: install commands, then the line that gets the repo for this pla
 });
 
 /** Run the real CLI against the fake gh and return its link, output and exit. */
-async function runCli({ browser = false, path = "" } = {}) {
-  const env = { ...process.env, PATH: `${path}${fileURLToPath(new URL("./fake-gh", import.meta.url))}${delimiter}${process.env.PATH}`, NO_COLOR: "1" };
+async function runCli({ browser = false, path = "", env: extra = {} } = {}) {
+  const env = { ...process.env, PATH: `${path}${fileURLToPath(new URL("./fake-gh", import.meta.url))}${delimiter}${process.env.PATH}`, NO_COLOR: "1", ...extra };
   for (const v of ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"]) delete env[v];
   const proc = spawn(process.execPath, [fileURLToPath(new URL("../cli/bin.mjs", import.meta.url)), ...(browser ? [] : ["--no-browser"])], { env });
   let out = "";
@@ -431,8 +445,10 @@ test("writeOpener: a 0600 page in a 0700 directory, removed afterwards; only qq-
   const url = "http://127.0.0.1:43210/#key=abcdefghijklmnopqrstuvwx";
   const o = await writeOpener(url);
   try {
-    assert.equal(statSync(o.path).mode & 0o777, 0o600);
-    assert.equal(statSync(dirname(o.path)).mode & 0o777, 0o700);
+    if (process.platform !== "win32") { // Windows reports no POSIX modes
+      assert.equal(statSync(o.path).mode & 0o777, 0o600);
+      assert.equal(statSync(dirname(o.path)).mode & 0o777, 0o700);
+    }
     assert.ok(readFileSync(o.path, "utf8").includes(`location.replace(${JSON.stringify(url)})`));
   } finally {
     o.remove();
@@ -469,3 +485,68 @@ test("cli: the browser opener's argv holds a file path, never the key", { skip: 
     rmSync(bin, { recursive: true, force: true });
   }
 });
+
+test("openerBase: a snap browser gets a folder it can read; anything else gets the temp folder", async () => {
+  const home = mkdtempSync(join(tmpdir(), "qq-setup-home-"));
+  try {
+    mkdirSync(join(home, "snap", "firefox", "common"), { recursive: true });
+    const base = (/** @type {string} */ desktop, platform = "linux") =>
+      openerBase({ platform, home, defaultBrowser: async () => desktop });
+    assert.equal(await base("firefox_firefox.desktop\n"), join(home, "snap", "firefox", "common"));
+    assert.equal(await base("chromium_chromium.desktop"), tmpdir()); // no ~/snap/chromium/common here
+    assert.equal(await base("firefox.desktop"), tmpdir());
+    assert.equal(await base("org.mozilla.firefox.desktop"), tmpdir()); // flatpak: not detected
+    assert.equal(await base("../x_y.desktop"), tmpdir());
+    assert.equal(await base(""), tmpdir());
+    assert.equal(await base("firefox_firefox.desktop", "darwin"), tmpdir());
+    const o = await writeOpener("http://127.0.0.1:1234/#key=abcdefghijklmnopqrstuvwx", await base("firefox_firefox.desktop"));
+    assert.ok(o.path.startsWith(join(home, "snap", "firefox", "common", "qq-setup-")));
+    o.remove();
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("cli: no temp folder means no auto-open, never a failed run; the terminal reports trades", async () => {
+  const cli = await runCli({ browser: true, env: { TMPDIR: "/nonexistent-qq-setup-dir", TMP: "/nonexistent-qq-setup-dir", TEMP: "/nonexistent-qq-setup-dir" } });
+  try {
+    await new Promise((ok) => setTimeout(ok, 300));
+    assert.match(cli.output(), /Could not prepare the page that opens your browser; use the link above/);
+    assert.equal(cli.proc.exitCode, null, "still waiting for the form");
+    await openSession(cli.port, cli.key);
+    const again = await hit(cli.port, { method: "POST", path: "/api/session",
+      headers: { origin: `http://127.0.0.1:${cli.port}`, "x-qq-setup": "1", "x-qq-setup-key": cli.key } });
+    assert.equal(again.status, 403);
+    await new Promise((ok) => setTimeout(ok, 100));
+    assert.match(cli.output(), /The form was opened in a browser \(\d\d:\d\d:\d\d\)\. If that was not you, press Ctrl-C\./);
+    assert.match(cli.output(), /Someone tried the link again; it was refused\./);
+  } finally {
+    cli.proc.kill();
+  }
+});
+
+for (const sig of /** @type {const} */ (["SIGTERM", "SIGHUP", "SIGINT"])) {
+  test(`cli: ${sig} removes the opener page and still ends the run by that signal`, { skip: process.platform === "win32" }, async () => {
+    const bin = mkdtempSync(join(tmpdir(), "qq-setup-opener-"));
+    const log = join(bin, "argv.log");
+    for (const name of ["xdg-open", "open"]) {
+      writeFileSync(join(bin, name), `#!/bin/sh\nprintf '%s\\n' "$@" >> '${log}'\n`, { mode: 0o755 });
+    }
+    const cli = await runCli({ browser: true, path: `${bin}${delimiter}` });
+    try {
+      let page = "";
+      for (let i = 0; i < 50 && !page; i++) {
+        await new Promise((ok) => setTimeout(ok, 100));
+        page = existsSync(log) ? readFileSync(log, "utf8").trim() : "";
+      }
+      assert.ok(existsSync(page), "the opener page exists while the form waits");
+      const done = new Promise((ok) => cli.proc.once("exit", (code, signal) => ok({ code, signal })));
+      cli.proc.kill(sig);
+      assert.deepEqual(await done, { code: null, signal: sig });
+      assert.equal(existsSync(dirname(page)), false);
+    } finally {
+      cli.proc.kill();
+      rmSync(bin, { recursive: true, force: true });
+    }
+  });
+}

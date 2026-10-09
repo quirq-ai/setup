@@ -63,12 +63,17 @@ request from the form for 30 minutes), 2 error. Ctrl-C stops it by signal, which
 - Every GitHub call is `gh api --method GET`. qq-setup never reads, stores or prints your token:
   `gh` makes the request itself.
 - The form server listens on `127.0.0.1` only, answers only requests whose `Host` is exactly that
-  address (no DNS rebinding), and answers `/api/*` only to the one page that used the printed link.
+  address (no DNS rebinding), and answers `/api/*` only to the one tab that used the printed link.
   The link's key is in its `#fragment`, which browsers never send to a server, and works once: the
-  page trades it for an HttpOnly, SameSite=Strict cookie and drops it from the address bar, so a
-  second browser or tab with the same link gets nothing. The browser is opened through a page only
-  you can read (a 0600 file in a 0700 temporary folder, deleted once used), so the key never appears
-  on a command line that other users of the machine could see with `ps`.
+  tab trades it for an HttpOnly, SameSite=Strict cookie plus a token it keeps in its own
+  `sessionStorage`, and drops the key from the address bar. Every later call needs both, so another
+  tab, another browser, or another program listening on 127.0.0.1 (browsers send cookies to every
+  port there) gets nothing. The terminal says when the link was used, and when someone tries it again.
+- When qq-setup opens your browser itself, it passes only the path of a page only you can read (a
+  0600 file in a 0700 temporary folder, under `~/snap/<browser>/common` for a snap browser), deleted
+  once used, so the key does not appear on a command line other users could see with `ps`. If you
+  open the printed link by hand, it briefly can, which is why it works only once. Flatpak browsers,
+  or a `.html` file that opens in an editor, need the printed link.
 - The page receives only names the command already read (orgs, repos, kinds), your platform name
   and the fixed text of the install path, never a token. Its answers are checked against those
   names before the terminal uses them.

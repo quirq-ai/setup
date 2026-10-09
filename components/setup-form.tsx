@@ -27,22 +27,33 @@ import { isBlankRepo, isName, parseRepo } from "@/cli/names.mjs";
 
 type Mode = "repos" | "tools";
 
-// "pending" while prerendering and until the server answers; "none" when this page holds neither
-// the link's unused key nor the cookie it was traded for.
+// "pending" while prerendering and until the server answers; "none" when this tab holds neither
+// the link's unused key nor the session it was traded for.
 type Session = "pending" | "ready" | "none";
 
+// What happened to the link's key: traded by this tab, refused (already used), or there was none.
+type Opened = "traded" | "refused" | "nokey";
+
 // Started once per page load, outside React, so a re-run effect never races its own key trade.
-let opened: Promise<void> | null = null;
-function openSession(): Promise<void> {
+let opened: Promise<Opened> | null = null;
+function openSession(): Promise<Opened> {
   if (!opened) {
-    // The key lives in the fragment of the link the terminal printed. Trade it for the session cookie
-    // once, and drop it from the address bar and history. A reload has no key but keeps the cookie.
+    // The key lives in the fragment of the link the terminal printed. Trade it once, and drop it from
+    // the address bar and history. A reload has no key but keeps this tab's session.
     const key = keyFromHash(window.location.hash);
     if (key) window.history.replaceState(null, "", window.location.pathname + window.location.search);
-    opened = key ? api.session(key).then(() => undefined, () => undefined) : Promise.resolve();
+    opened = key
+      ? api.session(key).then(
+          (): Opened => "traded",
+          (e: unknown): Opened | Promise<never> => (e instanceof ApiError && e.status === 403 ? "refused" : Promise.reject(e)),
+        )
+      : Promise.resolve<Opened>("nokey");
   }
   return opened;
 }
+
+const NO_COOKIE =
+  "Your browser did not keep qq-setup's cookie, so this page cannot go on. Allow cookies for 127.0.0.1 and run the command again.";
 
 export function SetupForm() {
   const [session, setSession] = useState<Session>("pending");
@@ -83,7 +94,13 @@ export function SetupForm() {
   useEffect(() => {
     let live = true;
     openSession()
-      .then(() => api.state())
+      .then((how) =>
+        api.state().catch((e: unknown) => {
+          // The trade worked, yet the cookie did not come back: the browser refused to store it.
+          if (how === "traded" && e instanceof ApiError && e.status === 401) throw new Error(NO_COOKIE);
+          throw e;
+        }),
+      )
       .then(
         (s) => {
           if (!live) return;
@@ -112,8 +129,9 @@ export function SetupForm() {
         <AlertTitle>Open this page from your terminal</AlertTitle>
         <AlertDescription>
           Run <code className="font-mono break-all">npx --allow-remote=root https://codeload.github.com/quirq-ai/setup/tar.gz/&lt;commit&gt;</code> and
-          use the link it prints. Each link works in one tab only: if you already opened it, go back to that
-          tab, or run the command again for a new link.
+          use the link it prints. Each link works in one tab only. If it was already opened, go back to that
+          tab, or run the command again for a new link. If you did not open it anywhere else, stop the command
+          with Ctrl-C.
         </AlertDescription>
       </Alert>
     );

@@ -1,6 +1,7 @@
 // The form's side of the local API that cli/server.mjs serves. The page trades the single-use key
-// from the link's fragment (which browsers never send anywhere) for an HttpOnly session cookie, then
-// every call carries that cookie and the x-qq-setup header.
+// from the link's fragment (which browsers never send anywhere) for an HttpOnly session cookie and a
+// token. The token lives in this tab's sessionStorage (scoped to this port, unlike cookies) and goes
+// in the x-qq-setup header of every later call, with the cookie.
 
 export type Kind = "python-service" | "pytest" | "node-app" | "gatsby-site";
 
@@ -59,10 +60,24 @@ export class ApiError extends Error {
   }
 }
 
+const TOKEN = "qq-setup-token";
+
+function readToken(): string | null {
+  try {
+    return window.sessionStorage.getItem(TOKEN);
+  } catch {
+    return null;
+  }
+}
+
+export function hasToken(): boolean {
+  return readToken() !== null;
+}
+
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
-    headers: { ...(init?.headers ?? {}), "x-qq-setup": "1" },
+    headers: { "x-qq-setup": readToken() ?? "1", ...(init?.headers ?? {}) },
     credentials: "same-origin",
     cache: "no-store",
   });
@@ -80,7 +95,19 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  session: (key: string) => call<{ ok: true }>("/api/session", { method: "POST", headers: { "x-qq-setup-key": key } }),
+  /** Trade the link's key; resolves true once the tab holds the token (the cookie is the browser's). */
+  session: async (key: string) => {
+    const r = await call<{ ok: true; token: string }>("/api/session", {
+      method: "POST",
+      headers: { "x-qq-setup-key": key, "x-qq-setup": "1" },
+    });
+    try {
+      window.sessionStorage.setItem(TOKEN, r.token);
+    } catch {
+      throw new ApiError("Your browser would not let this page keep its sign-in for this tab (sessionStorage): allow site data for 127.0.0.1 and run the command again.", 0);
+    }
+    return true;
+  },
   state: () => call<State>("/api/state"),
   repos: (org: string) => call<RepoList>(`/api/repos?org=${encodeURIComponent(org)}`),
   submit: (answers: Answers | ToolsAnswer) =>
