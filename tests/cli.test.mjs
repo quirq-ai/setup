@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { request } from "node:http";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
@@ -550,3 +550,41 @@ for (const sig of /** @type {const} */ (["SIGTERM", "SIGHUP", "SIGINT"])) {
     }
   });
 }
+
+test("cli: a flood of tries on a used link prints one line, then only a count at 10, 100…", async () => {
+  const cli = await runCli();
+  try {
+    await openSession(cli.port, cli.key);
+    const h = { origin: `http://127.0.0.1:${cli.port}`, "x-qq-setup": "1", "x-qq-setup-key": cli.key };
+    for (let i = 0; i < 120; i++) {
+      assert.equal((await hit(cli.port, { method: "POST", path: "/api/session", headers: h })).status, 403);
+    }
+    await new Promise((ok) => setTimeout(ok, 100));
+    const out = cli.output();
+    assert.equal(out.match(/Someone tried the link again; it was refused\./g)?.length, 1);
+    assert.deepEqual(out.match(/tried again \d+ times/g), ["tried again 10 times", "tried again 100 times"]);
+  } finally {
+    cli.proc.kill();
+  }
+});
+
+test("cli: if the link is used while the browser page is being prepared, no browser is opened", { skip: process.platform !== "linux" }, async () => {
+  const bin = mkdtempSync(join(tmpdir(), "qq-setup-opener-"));
+  const tmp = mkdtempSync(join(tmpdir(), "qq-setup-tmp-"));
+  const log = join(bin, "argv.log");
+  writeFileSync(join(bin, "xdg-open"), `#!/bin/sh\nprintf '%s\\n' "$@" >> '${log}'\n`, { mode: 0o755 });
+  // A slow desktop: finding the default browser takes a while.
+  writeFileSync(join(bin, "xdg-settings"), "#!/bin/sh\nsleep 1.5\necho firefox.desktop\n", { mode: 0o755 });
+  const cli = await runCli({ browser: true, path: `${bin}${delimiter}`, env: { TMPDIR: tmp } });
+  try {
+    await openSession(cli.port, cli.key); // the printed link, used before the page is ready
+    await new Promise((ok) => setTimeout(ok, 2500));
+    assert.equal(existsSync(log), false, "no browser was opened on the dead link");
+    assert.deepEqual(readdirSync(tmp), [], "the page was removed");
+    assert.doesNotMatch(cli.output(), /tried the link again/);
+  } finally {
+    cli.proc.kill();
+    rmSync(bin, { recursive: true, force: true });
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});

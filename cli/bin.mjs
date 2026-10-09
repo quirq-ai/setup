@@ -101,16 +101,25 @@ async function main(argv = process.argv.slice(2)) {
 
   /** @type {() => void} */
   let removeOpener = () => {};
+  // Set once a page has traded the key, so a slow auto-open never launches a browser on a dead link.
+  let traded = false;
+  let refused = 0;
   const form = await startServer({
     root: join(ROOT, "out"),
     port,
     // The page has traded the key: the redirect page is no longer needed.
     onSession: () => {
+      traded = true;
       removeOpener();
       const at = new Date().toTimeString().slice(0, 8);
       console.log(`The form was opened in a browser (${at}). If that was not you, press Ctrl-C.`);
     },
-    onRefusedTrade: () => console.log("Someone tried the link again; it was refused."),
+    // Once, then only at 10, 100, 1000…: a flood of tries cannot push the Ctrl-C warning off screen.
+    onRefusedTrade: () => {
+      refused++;
+      if (refused === 1) console.log("Someone tried the link again; it was refused.");
+      else if (Number.isInteger(Math.log10(refused))) console.log(`The link has now been tried again ${refused} times; all refused.`);
+    },
     handlers: {
       state: async () => (touch(), { version: pkg.version, readOnly: true, login, orgs, platform: process.platform,
         tools: { install: INSTALL, ...commandsFor(process.platform), needs: NEEDS, mac: MAC, access: ACCESS } }),
@@ -155,20 +164,28 @@ async function main(argv = process.argv.slice(2)) {
   console.log(`  ${bold(form.url)}\n`);
   if (!noBrowser) {
     // The opener sees only a file path, never the key (cli/opener.mjs).
+    /** @type {Awaited<ReturnType<typeof writeOpener>> | null} */
+    let opener = null;
     try {
-      const opener = await writeOpener(form.url, await openerBase());
-      removeOpener = opener.remove;
-      process.once("exit", opener.remove);
+      opener = await writeOpener(form.url, await openerBase());
+    } catch {
+      console.log("  (Could not prepare the page that opens your browser; use the link above.)");
+    }
+    // Finding the folder can take a few seconds. If the printed link was used meanwhile, the key is
+    // dead: remove the page and open nothing.
+    if (opener && traded) opener.remove();
+    else if (opener) {
+      const page = opener;
+      removeOpener = page.remove;
+      process.once("exit", page.remove);
       // Clean up, then die by the same signal, so a shell sees what it would have without us.
       for (const sig of /** @type {const} */ (["SIGINT", "SIGTERM", "SIGHUP"])) {
         process.once(sig, () => {
-          opener.remove();
+          page.remove();
           process.kill(process.pid, sig);
         });
       }
-      openFile(opener.path);
-    } catch {
-      console.log("  (Could not prepare the page that opens your browser; use the link above.)");
+      openFile(page.path);
     }
   }
   console.log("Waiting for the form. Ctrl-C stops.");
