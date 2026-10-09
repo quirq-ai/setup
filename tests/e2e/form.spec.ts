@@ -142,7 +142,7 @@ for (const scheme of ["light", "dark"] as const) {
         await page.getByRole("radio", { name: "Install qq on my machine and work on a repo" }).check();
         await expect(page.getByRole("radio", { name: /acme-labs/ })).toHaveCount(0);
         await expect(page.getByText("1. Install qq on this machine")).toBeVisible();
-        await expect(page.getByText(/git clone -q https:\/\/github\.com\/quirq-ai\/depot/)).toBeVisible();
+        await expect(page.getByText(/git clone -q https:\/\/github\.com\/quirq-ai\/qq /)).toBeVisible();
         for (const notARepo of [".git", "https://github.com/"]) {
           await page.getByLabel("Repo (optional)").fill(notARepo);
           await expect(page.getByText("Write it as owner/name, like quirq-ai/innernet.")).toBeVisible();

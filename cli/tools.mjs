@@ -1,7 +1,7 @@
 // @ts-check
 // The second way in: put qq on this machine and work on a repo that already uses it. qq-setup only
 // prints these commands; it runs none of them. They are copied from the qq guide
-// (quirq-ai/docs content/docs/qq.mdx, "Use qq on your machine", at eecdbca); change both together,
+// (quirq-ai/docs content/docs/qq.mdx, "Use qq on your machine", at e67769e); change both together,
 // with tests/fixtures/qq-guide-install.txt.
 
 import { isBlankRepo, parseRepo } from "./names.mjs";
@@ -10,7 +10,7 @@ import { isBlankRepo, parseRepo } from "./names.mjs";
 export const INSTALL = [
   {
     what: "Install qq",
-    cmd: "( set -e; mkdir -p ~/qq-tools; rm -rf ~/qq-tools/depot; git clone -q https://github.com/quirq-ai/depot ~/qq-tools/depot; ~/qq-tools/depot/bin/qq --version )",
+    cmd: "( set -e; mkdir -p ~/qq-tools; rm -rf ~/qq-tools/depot; git clone -q https://github.com/quirq-ai/qq ~/qq-tools/depot; ~/qq-tools/depot/bin/qq --version )",
   },
   {
     what: "Install qqsync (pinned to the sync commit qq itself pins)",
