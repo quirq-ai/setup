@@ -1,7 +1,7 @@
 // @ts-check
 // The second way in: put qq on this machine and work on a repo that already uses it. qq-setup only
 // prints these commands; it runs none of them. They are copied from the qq guide
-// (quirq-ai/docs content/docs/qq.mdx, "Use qq on your machine", at eecdbca); change both together,
+// (quirq-ai/docs content/docs/qq.mdx, "Use qq on your machine", at e67769e); change both together,
 // with tests/fixtures/qq-guide-install.txt.
 
 import { isBlankRepo, parseRepo } from "./names.mjs";
