@@ -1,6 +1,10 @@
 // @ts-check
 // The form's local server. It listens on 127.0.0.1 only, serves the static form from out/, and
-// answers /api/* only to a page that holds the one-time key from the link the terminal printed.
+// answers /api/* only to the one page that traded the link's key for a session cookie.
+// The key is single-use: POST /api/session swaps it for an HttpOnly, SameSite=Strict cookie, so a
+// key seen later (a browser's argv, history, a shoulder) opens nothing. Every other /api/* call
+// needs that cookie and the x-qq-setup header, which no other origin can send without a CORS
+// preflight this server never answers.
 // The GitHub token never reaches the page: the page only sees names the command already read.
 
 import { randomBytes, timingSafeEqual } from "node:crypto";
@@ -43,12 +47,16 @@ const MAX_BODY = 16 * 1024;
 
 /**
  * Start the form server. Resolves once it listens.
- * @param {{ root: string, handlers: Handlers, port?: number }} opts
+ * @param {{ root: string, handlers: Handlers, port?: number, onSession?: () => void }} opts
+ *   onSession runs once, when the page has traded the key for its cookie.
  * @returns {Promise<{ url: string, key: string, port: number, close: () => void }>}
  */
-export async function startServer({ root, handlers, port = 0 }) {
+export async function startServer({ root, handlers, port = 0, onSession = () => {} }) {
   const key = randomBytes(24).toString("base64url");
   const keyBuf = Buffer.from(key);
+  /** The session cookie's value, once the key has been used; until then nothing opens /api/*. */
+  /** @type {Buffer | null} */
+  let session = null;
   const outRoot = resolve(root);
   /** @type {number} */
   let boundPort = 0;
@@ -60,12 +68,32 @@ export async function startServer({ root, handlers, port = 0 }) {
       const url = new URL(req.url ?? "/", `http://127.0.0.1:${boundPort}`);
 
       if (url.pathname.startsWith("/api/")) {
-        const given = Buffer.from(String(req.headers["x-qq-setup-key"] ?? ""));
-        if (given.length !== keyBuf.length || !timingSafeEqual(given, keyBuf)) {
-          return send(res, 403, { error: "this page is not the one the terminal opened; use the link it printed" });
-        }
         const origin = req.headers.origin;
-        if (origin !== undefined && origin !== `http://127.0.0.1:${boundPort}`) return send(res, 403, { error: "wrong origin" });
+        const ours = `http://127.0.0.1:${boundPort}`;
+        if (origin !== undefined && origin !== ours) return send(res, 403, { error: "wrong origin" });
+        // A custom header: another origin cannot send it without a CORS preflight, which gets a 404.
+        if (req.headers["x-qq-setup"] !== "1") return send(res, 403, { error: "missing x-qq-setup header" });
+        const cookieName = `qq_setup_${boundPort}`;
+
+        if (url.pathname === "/api/session") {
+          if (req.method !== "POST" || origin !== ours) return send(res, 403, { error: "wrong origin" });
+          const given = Buffer.from(String(req.headers["x-qq-setup-key"] ?? ""));
+          if (session || given.length !== keyBuf.length || !timingSafeEqual(given, keyBuf)) {
+            return send(res, 403, { error: "this link was already used, or is not the one the terminal printed" });
+          }
+          const value = randomBytes(32).toString("base64url");
+          session = Buffer.from(value);
+          onSession();
+          return send(res, 200, { ok: true }, {
+            "Set-Cookie": `${cookieName}=${value}; Path=/api; HttpOnly; SameSite=Strict`,
+          });
+        }
+
+        const cookie = readCookie(req.headers.cookie, cookieName);
+        if (!session || cookie.length !== session.length || !timingSafeEqual(cookie, session)) {
+          return send(res, 401, { error: "this page is not the one the terminal opened; use the link it printed" });
+        }
+        if (req.method === "POST" && origin !== ours) return send(res, 403, { error: "wrong origin" });
 
         if (req.method === "GET" && url.pathname === "/api/state") return send(res, 200, await handlers.state());
         if (req.method === "GET" && url.pathname === "/api/repos") {
@@ -170,10 +198,23 @@ async function serveStatic(res, outRoot, pathname, head) {
   res.end(head ? undefined : body);
 }
 
-/** @param {import("node:http").ServerResponse} res @param {number} status @param {unknown} body */
-function send(res, status, body) {
+/** One cookie's value as bytes, or an empty buffer. @param {string | undefined} header @param {string} name */
+function readCookie(header, name) {
+  for (const part of String(header ?? "").split(";")) {
+    const eq = part.indexOf("=");
+    if (eq > 0 && part.slice(0, eq).trim() === name) return Buffer.from(part.slice(eq + 1).trim());
+  }
+  return Buffer.alloc(0);
+}
+
+/**
+ * @param {import("node:http").ServerResponse} res @param {number} status @param {unknown} body
+ * @param {Record<string, string>} [extra]  more headers
+ */
+function send(res, status, body, extra = {}) {
   if (res.headersSent) return;
   res.writeHead(status, {
+    ...extra,
     ...SECURITY_HEADERS,
     "Content-Type": "application/json",
     "Cache-Control": "no-store",

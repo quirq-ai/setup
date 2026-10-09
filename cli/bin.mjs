@@ -5,7 +5,6 @@
 // terminal shows the plan or prints the install commands.
 // THIS BUILD IS READ-ONLY: it reads GitHub through your gh login and writes nothing anywhere.
 
-import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +13,7 @@ import { getJson, GhError, isName } from "./gh.mjs";
 import { buildPlan, checkAnswers, CONFIG_REPO } from "./plan.mjs";
 import { preflight } from "./preflight.mjs";
 import { protectionWarnings, readProtection } from "./protection.mjs";
+import { openFile, writeOpener } from "./opener.mjs";
 import { startServer } from "./server.mjs";
 import { ACCESS, checkTools, INSTALL, MAC, NEEDS, toolsText, commandsFor } from "./tools.mjs";
 
@@ -99,9 +99,13 @@ async function main(argv = process.argv.slice(2)) {
     timer = setTimeout(() => idleOut(null), IDLE_MS);
   };
 
+  /** @type {() => void} */
+  let removeOpener = () => {};
   const form = await startServer({
     root: join(ROOT, "out"),
     port,
+    // The page has traded the key for its cookie: the redirect page is no longer needed.
+    onSession: () => removeOpener(),
     handlers: {
       state: async () => (touch(), { version: pkg.version, readOnly: true, login, orgs, platform: process.platform,
         tools: { install: INSTALL, ...commandsFor(process.platform), needs: NEEDS, mac: MAC, access: ACCESS } }),
@@ -142,7 +146,14 @@ async function main(argv = process.argv.slice(2)) {
   const noBrowser = argv.includes("--no-browser");
   console.log(`\n${noBrowser ? "Open this link" : "Opening your browser. If it does not open, use this link"} (it works only on this machine):`);
   console.log(`  ${bold(form.url)}\n`);
-  if (!noBrowser) openBrowser(form.url);
+  if (!noBrowser) {
+    // The opener sees only a file path, never the key (cli/opener.mjs).
+    const opener = await writeOpener(form.url);
+    removeOpener = opener.remove;
+    process.once("exit", opener.remove);
+    process.once("SIGINT", () => (opener.remove(), process.exit(130)));
+    openFile(opener.path);
+  }
   console.log("Waiting for the form. Ctrl-C stops.");
 
   touch();
@@ -151,6 +162,7 @@ async function main(argv = process.argv.slice(2)) {
   // Let the page receive its "go back to the terminal" answer before the server stops.
   await new Promise((ok) => setTimeout(ok, 300));
   form.close();
+  removeOpener();
   if (!answers) {
     console.error("qq-setup: no answer from the form for 30 minutes; stopped. Run it again when ready.");
     return 1;
@@ -193,15 +205,6 @@ async function repoExists(org, repo) {
     if (e instanceof GhError && e.status === 404) return false;
     throw e;
   }
-}
-
-/** Open the link with the platform's opener; never through a shell. @param {string} url */
-function openBrowser(url) {
-  const [cmd, args] =
-    process.platform === "darwin" ? ["open", [url]]
-    : process.platform === "win32" ? ["rundll32", ["url.dll,FileProtocolHandler", url]]
-    : ["xdg-open", [url]];
-  execFile(cmd, args, { timeout: 10_000 }, () => {}); // failure is fine: the link is printed
 }
 
 main().then(

@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { request } from "node:http";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
@@ -17,6 +17,7 @@ import { listRepos } from "../cli/facts.mjs";
 import { classicFromError, protectionWarnings } from "../cli/protection.mjs";
 import { isBlankRepo, normalizeRepo, parseRepo } from "../cli/names.mjs";
 import { checkTools, commandsFor, getLine, INSTALL, MAC, toolsText } from "../cli/tools.mjs";
+import { writeOpener } from "../cli/opener.mjs";
 import { startServer } from "../cli/server.mjs";
 
 test("detectKinds offers a kind only when kinds.toml's stand-in commands will run", () => {
@@ -180,15 +181,30 @@ function hit(port, o) {
   });
 }
 
-test("server: key, host, origin, body size and static files", async () => {
+/**
+ * Trade the link's key for the session cookie, as the page does; returns the headers the page then
+ * sends on every call.
+ * @param {number} port @param {string} key
+ */
+async function openSession(port, key) {
+  const origin = `http://127.0.0.1:${port}`;
+  const res = await hit(port, { method: "POST", path: "/api/session", headers: { origin, "x-qq-setup": "1", "x-qq-setup-key": key } });
+  assert.equal(res.status, 200, res.body);
+  const set = String(res.headers["set-cookie"] ?? "");
+  return { set, headers: { origin, "x-qq-setup": "1", cookie: set.split(";")[0] } };
+}
+
+test("server: single-use key, session cookie, host, origin, body size and static files", async () => {
   const root = await mkdtemp(join(tmpdir(), "qq-setup-test-"));
   await mkdir(join(root, "out"));
   await writeFile(join(root, "out", "index.html"), "<p>form</p>");
   await writeFile(join(root, "secret.txt"), "outside");
   /** @type {unknown[]} */
   const submitted = [];
+  let sessions = 0;
   const srv = await startServer({
     root: join(root, "out"),
+    onSession: () => sessions++,
     handlers: {
       state: async () => ({ hello: "world" }),
       repos: async (org) => ({ org }),
@@ -198,7 +214,7 @@ test("server: key, host, origin, body size and static files", async () => {
   });
   try {
     const p = srv.port;
-    const k = { "x-qq-setup-key": srv.key };
+    const origin = `http://127.0.0.1:${p}`;
     assert.ok(srv.url.startsWith(`http://127.0.0.1:${p}/#key=`));
 
     const page = await hit(p, { path: "/" });
@@ -206,11 +222,32 @@ test("server: key, host, origin, body size and static files", async () => {
     assert.equal(page.body, "<p>form</p>");
     assert.match(String(page.headers["content-security-policy"]), /connect-src 'self'/);
 
+    // Before the key is traded, nothing opens the API: not the key itself, not a guessed cookie.
+    const x = { "x-qq-setup": "1" };
     assert.equal((await hit(p, { path: "/api/state" })).status, 403);
-    assert.equal((await hit(p, { path: "/api/state", headers: { "x-qq-setup-key": "wrong" } })).status, 403);
+    assert.equal((await hit(p, { path: "/api/state", headers: x })).status, 401);
+    assert.equal((await hit(p, { path: "/api/state", headers: { ...x, "x-qq-setup-key": srv.key } })).status, 401);
+    assert.equal((await hit(p, { path: "/api/state", headers: { ...x, cookie: `qq_setup_${p}=` } })).status, 401);
+    // The trade needs our origin, the header and the right key.
+    const trade = (/** @type {Record<string, string>} */ h) => hit(p, { method: "POST", path: "/api/session", headers: h });
+    assert.equal((await trade({ origin, "x-qq-setup-key": srv.key })).status, 403);
+    assert.equal((await trade({ ...x, "x-qq-setup-key": srv.key })).status, 403);
+    assert.equal((await trade({ ...x, origin: "http://127.0.0.1:1", "x-qq-setup-key": srv.key })).status, 403);
+    assert.equal((await trade({ ...x, origin, "x-qq-setup-key": "wrong" })).status, 403);
+    assert.equal(sessions, 0);
+    const { set, headers: k } = await openSession(p, srv.key);
+    assert.equal(sessions, 1);
+    assert.match(set, new RegExp(`^qq_setup_${p}=[A-Za-z0-9_-]{43}; Path=/api; HttpOnly; SameSite=Strict$`));
+    // Single-use: the same key again, from anyone, gets nothing.
+    assert.equal((await trade({ ...x, origin, "x-qq-setup-key": srv.key })).status, 403);
+    assert.equal(sessions, 1);
+
     assert.equal((await hit(p, { path: "/api/state", headers: k })).body, JSON.stringify({ hello: "world" }));
+    assert.equal((await hit(p, { path: "/api/state", headers: { cookie: k.cookie } })).status, 403); // no x-qq-setup
+    assert.equal((await hit(p, { path: "/api/state", headers: { ...k, cookie: `${k.cookie}x` } })).status, 401);
     assert.equal((await hit(p, { path: "/api/state", headers: k, host: `localhost:${p}` })).status, 421);
     assert.equal((await hit(p, { path: "/api/state", headers: { ...k, origin: "http://evil.example" } })).status, 403);
+    assert.equal((await hit(p, { path: "/api/state", headers: { ...k, origin: "http://127.0.0.1:1" } })).status, 403);
 
     assert.equal((await hit(p, { path: "/../secret.txt" })).status, 404);
     assert.equal((await hit(p, { path: "/%2e%2e/secret.txt" })).status, 404);
@@ -218,6 +255,8 @@ test("server: key, host, origin, body size and static files", async () => {
 
     const post = (/** @type {string} */ body, /** @type {Record<string, string>} */ h = {}) =>
       hit(p, { method: "POST", path: "/api/answers", headers: { ...k, "content-type": "application/json", ...h }, body });
+    const { origin: _o, ...noOrigin } = k;
+    assert.equal((await hit(p, { method: "POST", path: "/api/answers", headers: { ...noOrigin, "content-type": "application/json" }, body: "{}" })).status, 403);
     assert.equal((await post("{}", { "content-type": "text/plain" })).status, 415);
     assert.equal((await post("not json")).status, 400);
     assert.equal((await post(JSON.stringify({ pad: "x".repeat(20_000) }))).status, 413);
@@ -342,10 +381,10 @@ test("toolsText: install commands, then the line that gets the repo for this pla
 });
 
 /** Run the real CLI against the fake gh and return its link, output and exit. */
-async function runCli() {
-  const env = { ...process.env, PATH: `${fileURLToPath(new URL("./fake-gh", import.meta.url))}${delimiter}${process.env.PATH}`, NO_COLOR: "1" };
+async function runCli({ browser = false, path = "" } = {}) {
+  const env = { ...process.env, PATH: `${path}${fileURLToPath(new URL("./fake-gh", import.meta.url))}${delimiter}${process.env.PATH}`, NO_COLOR: "1" };
   for (const v of ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"]) delete env[v];
-  const proc = spawn(process.execPath, [fileURLToPath(new URL("../cli/bin.mjs", import.meta.url)), "--no-browser"], { env });
+  const proc = spawn(process.execPath, [fileURLToPath(new URL("../cli/bin.mjs", import.meta.url)), ...(browser ? [] : ["--no-browser"])], { env });
   let out = "";
   proc.stdout.on("data", (c) => (out += c));
   proc.stderr.on("data", (c) => (out += c));
@@ -365,10 +404,11 @@ async function runCli() {
 
 test("cli: a body with mode never reaches the repos check, and a tools answer is the only answer", async () => {
   const cli = await runCli();
+  const { headers: k } = await openSession(cli.port, cli.key);
   const post = (/** @type {unknown} */ body) => hit(cli.port, { method: "POST", path: "/api/answers",
-    headers: { "x-qq-setup-key": cli.key, "content-type": "application/json" }, body: JSON.stringify(body) });
+    headers: { ...k, "content-type": "application/json" }, body: JSON.stringify(body) });
   try {
-    await hit(cli.port, { path: "/api/repos?org=acme-labs", headers: { "x-qq-setup-key": cli.key } });
+    await hit(cli.port, { path: "/api/repos?org=acme-labs", headers: k });
     // A complete, valid repos answer, but with a mode: refused by the tools check, never planned.
     const routed = await post({ mode: "repos", org: "acme-labs", repos: ["billing-api"], starter: null });
     assert.equal(routed.status, 400);
@@ -384,5 +424,48 @@ test("cli: a body with mode never reaches the repos check, and a tools answer is
     assert.doesNotMatch(cli.output(), /Plan for/);
   } finally {
     cli.proc.kill();
+  }
+});
+
+test("writeOpener: a 0600 page in a 0700 directory, removed afterwards; only qq-setup links", async () => {
+  const url = "http://127.0.0.1:43210/#key=abcdefghijklmnopqrstuvwx";
+  const o = await writeOpener(url);
+  try {
+    assert.equal(statSync(o.path).mode & 0o777, 0o600);
+    assert.equal(statSync(dirname(o.path)).mode & 0o777, 0o700);
+    assert.ok(readFileSync(o.path, "utf8").includes(`location.replace(${JSON.stringify(url)})`));
+  } finally {
+    o.remove();
+  }
+  assert.equal(existsSync(dirname(o.path)), false);
+  o.remove(); // twice is fine
+  for (const bad of ["http://evil.example/#key=abc", "http://127.0.0.1:1/#key=a\"<x", "file:///etc/passwd"]) {
+    await assert.rejects(writeOpener(bad), /not a qq-setup link/);
+  }
+});
+
+test("cli: the browser opener's argv holds a file path, never the key", { skip: process.platform === "win32" }, async () => {
+  const bin = mkdtempSync(join(tmpdir(), "qq-setup-opener-"));
+  const log = join(bin, "argv.log");
+  for (const name of ["xdg-open", "open"]) {
+    writeFileSync(join(bin, name), `#!/bin/sh\nprintf '%s\\n' "$@" >> '${log}'\n`, { mode: 0o755 });
+  }
+  const cli = await runCli({ browser: true, path: `${bin}${delimiter}` });
+  try {
+    let argv = "";
+    for (let i = 0; i < 50 && !argv; i++) {
+      await new Promise((ok) => setTimeout(ok, 100));
+      argv = existsSync(log) ? readFileSync(log, "utf8").trim() : "";
+    }
+    assert.ok(argv, "the opener ran");
+    assert.doesNotMatch(argv, /key=|127\.0\.0\.1/);
+    assert.match(argv, /qq-setup-[^/]+\/open\.html$/);
+    assert.ok(readFileSync(argv, "utf8").includes(cli.key), "the page it opens holds the link");
+    // Once the page trades the key, the redirect page is gone.
+    await openSession(cli.port, cli.key);
+    assert.equal(existsSync(argv), false);
+  } finally {
+    cli.proc.kill();
+    rmSync(bin, { recursive: true, force: true });
   }
 });

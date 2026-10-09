@@ -1,5 +1,6 @@
-// The form's side of the local API that cli/server.mjs serves. Every call carries the one-time key
-// from the link the terminal printed (kept in the URL fragment, which browsers never send anywhere).
+// The form's side of the local API that cli/server.mjs serves. The page trades the single-use key
+// from the link's fragment (which browsers never send anywhere) for an HttpOnly session cookie, then
+// every call carries that cookie and the x-qq-setup header.
 
 export type Kind = "python-service" | "pytest" | "node-app" | "gatsby-site";
 
@@ -49,10 +50,20 @@ export function keyFromHash(hash: string): string | null {
   return m ? m[1] : null;
 }
 
-async function call<T>(key: string, path: string, init?: RequestInit): Promise<T> {
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
+async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
-    headers: { ...(init?.headers ?? {}), "x-qq-setup-key": key },
+    headers: { ...(init?.headers ?? {}), "x-qq-setup": "1" },
+    credentials: "same-origin",
     cache: "no-store",
   });
   let body: unknown = null;
@@ -63,16 +74,17 @@ async function call<T>(key: string, path: string, init?: RequestInit): Promise<T
   }
   const error = body && typeof body === "object" && "error" in body ? String((body as { error: unknown }).error) : null;
   if (!res.ok || error) {
-    throw new Error(error ?? `qq-setup answered ${res.status}. Is it still running in your terminal?`);
+    throw new ApiError(error ?? `qq-setup answered ${res.status}. Is it still running in your terminal?`, res.status);
   }
   return body as T;
 }
 
 export const api = {
-  state: (key: string) => call<State>(key, "/api/state"),
-  repos: (key: string, org: string) => call<RepoList>(key, `/api/repos?org=${encodeURIComponent(org)}`),
-  submit: (key: string, answers: Answers | ToolsAnswer) =>
-    call<{ ok: true }>(key, "/api/answers", {
+  session: (key: string) => call<{ ok: true }>("/api/session", { method: "POST", headers: { "x-qq-setup-key": key } }),
+  state: () => call<State>("/api/state"),
+  repos: (org: string) => call<RepoList>(`/api/repos?org=${encodeURIComponent(org)}`),
+  submit: (answers: Answers | ToolsAnswer) =>
+    call<{ ok: true }>("/api/answers", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(answers),

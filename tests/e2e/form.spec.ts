@@ -114,6 +114,33 @@ test("a starter name taken by a repo the form did not list is refused", async ({
   }
 });
 
+test("the link works once: the key leaves the address bar, and a second browser gets nothing", async ({ browser }) => {
+  const cli = await startCli();
+  const first = await browser.newContext();
+  const second = await browser.newContext();
+  try {
+    const page = await first.newPage();
+    await page.goto(cli.url);
+    await expect(page.getByRole("radio", { name: /acme-labs/ })).toBeChecked();
+    expect(page.url()).not.toContain("key=");
+    const cookies = await first.cookies();
+    expect(cookies).toHaveLength(1);
+    expect(cookies[0]).toMatchObject({ httpOnly: true, sameSite: "Strict", path: "/api" });
+    // A reload keeps working on the cookie alone.
+    await page.reload();
+    await expect(page.getByRole("radio", { name: /acme-labs/ })).toBeChecked();
+
+    const other = await second.newPage();
+    await other.goto(cli.url);
+    await expect(other.getByText("Open this page from your terminal")).toBeVisible();
+    await expect(other.getByText("acme-labs")).toHaveCount(0);
+  } finally {
+    cli.proc.kill();
+    await first.close();
+    await second.close();
+  }
+});
+
 test("a page without the key gets nothing from the API", async ({ browser }) => {
   const cli = await startCli();
   const page = await browser.newPage();
