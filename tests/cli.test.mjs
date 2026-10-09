@@ -255,8 +255,8 @@ test("server: single-use key, session cookie, host, origin, body size and static
 
     const post = (/** @type {string} */ body, /** @type {Record<string, string>} */ h = {}) =>
       hit(p, { method: "POST", path: "/api/answers", headers: { ...k, "content-type": "application/json", ...h }, body });
-    const { origin: _o, ...noOrigin } = k;
-    assert.equal((await hit(p, { method: "POST", path: "/api/answers", headers: { ...noOrigin, "content-type": "application/json" }, body: "{}" })).status, 403);
+    const noOrigin = { "x-qq-setup": "1", cookie: k.cookie, "content-type": "application/json" };
+    assert.equal((await hit(p, { method: "POST", path: "/api/answers", headers: noOrigin, body: "{}" })).status, 403);
     assert.equal((await post("{}", { "content-type": "text/plain" })).status, 415);
     assert.equal((await post("not json")).status, 400);
     assert.equal((await post(JSON.stringify({ pad: "x".repeat(20_000) }))).status, 413);
