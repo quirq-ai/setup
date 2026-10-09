@@ -10,7 +10,7 @@ import { isBlankRepo, parseRepo } from "./names.mjs";
 export const INSTALL = [
   {
     what: "Install qq",
-    cmd: "( set -e; mkdir -p ~/qq-tools; rm -rf ~/qq-tools/depot; git clone -q https://github.com/quirq-ai/depot ~/qq-tools/depot; ~/qq-tools/depot/bin/qq --version )",
+    cmd: "( set -e; mkdir -p ~/qq-tools; rm -rf ~/qq-tools/depot; git clone -q https://github.com/quirq-ai/qq ~/qq-tools/depot; ~/qq-tools/depot/bin/qq --version )",
   },
   {
     what: "Install qqsync (pinned to the sync commit qq itself pins)",
