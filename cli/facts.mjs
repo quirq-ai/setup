@@ -10,7 +10,7 @@ import { encodeRef, getAll, getJson, isName, GhError } from "./gh.mjs";
  * command. They are not set up through this form, so setup never offers them. Names compare in
  * lower case, as GitHub's do.
  */
-export const QQ_OWN_REPOS = new Set(["depot", "sync", "recipes", "infra-config", "test-pipelines", "gate",
+export const QQ_OWN_REPOS = new Set(["qq", "sync", "recipes", "infra-config", "test-pipelines", "gate",
   "toolchains", "remote-build", "gardener", "rollers", "release", "installer", "perf", "setup"]);
 
 /** At most this many repos per org are checked, newest push first. */
