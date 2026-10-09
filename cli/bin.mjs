@@ -5,7 +5,6 @@
 // terminal shows the plan or prints the install commands.
 // THIS BUILD IS READ-ONLY: it reads GitHub through your gh login and writes nothing anywhere.
 
-import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +13,7 @@ import { getJson, GhError, isName } from "./gh.mjs";
 import { buildPlan, checkAnswers, CONFIG_REPO } from "./plan.mjs";
 import { preflight } from "./preflight.mjs";
 import { protectionWarnings, readProtection } from "./protection.mjs";
+import { openerBase, openFile, writeOpener } from "./opener.mjs";
 import { startServer } from "./server.mjs";
 import { ACCESS, checkTools, INSTALL, MAC, NEEDS, toolsText, commandsFor } from "./tools.mjs";
 
@@ -99,9 +99,18 @@ async function main(argv = process.argv.slice(2)) {
     timer = setTimeout(() => idleOut(null), IDLE_MS);
   };
 
+  /** @type {() => void} */
+  let removeOpener = () => {};
   const form = await startServer({
     root: join(ROOT, "out"),
     port,
+    // The page has traded the key: the redirect page is no longer needed.
+    onSession: () => {
+      removeOpener();
+      const at = new Date().toTimeString().slice(0, 8);
+      console.log(`The form was opened in a browser (${at}). If that was not you, press Ctrl-C.`);
+    },
+    onRefusedTrade: () => console.log("Someone tried the link again; it was refused."),
     handlers: {
       state: async () => (touch(), { version: pkg.version, readOnly: true, login, orgs, platform: process.platform,
         tools: { install: INSTALL, ...commandsFor(process.platform), needs: NEEDS, mac: MAC, access: ACCESS } }),
@@ -140,9 +149,28 @@ async function main(argv = process.argv.slice(2)) {
   });
 
   const noBrowser = argv.includes("--no-browser");
-  console.log(`\n${noBrowser ? "Open this link" : "Opening your browser. If it does not open, use this link"} (it works only on this machine):`);
+  console.log(noBrowser
+    ? "\nOpen this link (it works once, and only on this machine):"
+    : "\nOpening your browser. If it does not open, shows a file-not-found or access-denied page, or opens an editor,\nuse this link instead (it works once, and only on this machine):");
   console.log(`  ${bold(form.url)}\n`);
-  if (!noBrowser) openBrowser(form.url);
+  if (!noBrowser) {
+    // The opener sees only a file path, never the key (cli/opener.mjs).
+    try {
+      const opener = await writeOpener(form.url, await openerBase());
+      removeOpener = opener.remove;
+      process.once("exit", opener.remove);
+      // Clean up, then die by the same signal, so a shell sees what it would have without us.
+      for (const sig of /** @type {const} */ (["SIGINT", "SIGTERM", "SIGHUP"])) {
+        process.once(sig, () => {
+          opener.remove();
+          process.kill(process.pid, sig);
+        });
+      }
+      openFile(opener.path);
+    } catch {
+      console.log("  (Could not prepare the page that opens your browser; use the link above.)");
+    }
+  }
   console.log("Waiting for the form. Ctrl-C stops.");
 
   touch();
@@ -151,6 +179,7 @@ async function main(argv = process.argv.slice(2)) {
   // Let the page receive its "go back to the terminal" answer before the server stops.
   await new Promise((ok) => setTimeout(ok, 300));
   form.close();
+  removeOpener();
   if (!answers) {
     console.error("qq-setup: no answer from the form for 30 minutes; stopped. Run it again when ready.");
     return 1;
@@ -193,15 +222,6 @@ async function repoExists(org, repo) {
     if (e instanceof GhError && e.status === 404) return false;
     throw e;
   }
-}
-
-/** Open the link with the platform's opener; never through a shell. @param {string} url */
-function openBrowser(url) {
-  const [cmd, args] =
-    process.platform === "darwin" ? ["open", [url]]
-    : process.platform === "win32" ? ["rundll32", ["url.dll,FileProtocolHandler", url]]
-    : ["xdg-open", [url]];
-  execFile(cmd, args, { timeout: 10_000 }, () => {}); // failure is fine: the link is printed
 }
 
 main().then(

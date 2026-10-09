@@ -1,5 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { expect, test } from "@playwright/test";
@@ -108,6 +110,87 @@ test("a starter name taken by a repo the form did not list is refused", async ({
     await page.getByRole("button", { name: /Show the plan/ }).click();
     await expect(page.getByText("Back to your terminal")).toBeVisible();
     expect(await cli.exited).toBe(0);
+  } finally {
+    cli.proc.kill();
+    await page.close();
+  }
+});
+
+test("the link works once: the key leaves the address bar, and no other tab, browser or port gets in", async ({ browser }) => {
+  const cli = await startCli();
+  const port = Number(new URL(cli.url).port);
+  // Another program listening on 127.0.0.1: browsers send it the form's cookie too.
+  let harvested = "";
+  const thief = createServer((req, res) => {
+    if (req.url?.startsWith("/api/")) harvested = String(req.headers.cookie ?? "");
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end("<p>other</p>");
+  });
+  await new Promise<void>((ok) => thief.listen(0, "127.0.0.1", ok));
+  const thiefPort = (thief.address() as AddressInfo).port;
+  const first = await browser.newContext();
+  const second = await browser.newContext();
+  try {
+    const page = await first.newPage();
+    await page.goto(cli.url);
+    await expect(page.getByRole("radio", { name: /acme-labs/ })).toBeChecked();
+    expect(page.url()).not.toContain("key=");
+    const cookies = await first.cookies();
+    expect(cookies).toHaveLength(1);
+    expect(cookies[0]).toMatchObject({ httpOnly: true, sameSite: "Strict", path: "/api" });
+    // A reload keeps working on this tab's session.
+    await page.reload();
+    await expect(page.getByRole("radio", { name: /acme-labs/ })).toBeChecked();
+
+    // Another tab in the same browser has the cookie but not the tab's token.
+    const tab = await first.newPage();
+    await tab.goto(cli.url);
+    await expect(tab.getByText("Open this page from your terminal")).toBeVisible();
+    await expect(tab.getByText("acme-labs")).toHaveCount(0);
+
+    // A page on another port receives the cookie, and the cookie alone opens nothing.
+    const other = await first.newPage();
+    await other.goto(`http://127.0.0.1:${thiefPort}/`);
+    await other.evaluate(() => fetch("/api/x").then((r) => r.text()));
+    expect(harvested).toMatch(new RegExp(`qq_setup_${port}=`));
+    for (const header of ["1", ""]) {
+      const res = await fetch(`http://127.0.0.1:${port}/api/state`, {
+        headers: { cookie: harvested, ...(header ? { "x-qq-setup": header } : {}) },
+      });
+      expect(res.status).toBe(header ? 401 : 403);
+      expect(await res.text()).not.toContain("acme-labs");
+    }
+    // Control: that same cookie with the first tab's token does work, so the 401 above is the token's.
+    const token = await page.evaluate(() => sessionStorage.getItem("qq-setup-token"));
+    const ok = await fetch(`http://127.0.0.1:${port}/api/state`, { headers: { cookie: harvested, "x-qq-setup": String(token) } });
+    expect(ok.status).toBe(200);
+
+    // Another browser with the same link gets nothing either.
+    const stranger = await second.newPage();
+    await stranger.goto(cli.url);
+    await expect(stranger.getByText("Open this page from your terminal")).toBeVisible();
+    await expect(stranger.getByText("acme-labs")).toHaveCount(0);
+    expect(cli.output()).toMatch(/The form was opened in a browser/);
+    expect(cli.output()).toMatch(/Someone tried the link again; it was refused\./);
+  } finally {
+    cli.proc.kill();
+    thief.close();
+    await first.close();
+    await second.close();
+  }
+});
+
+test("a browser that does not keep the cookie is told so, not sent back to the terminal", async ({ browser }) => {
+  const cli = await startCli();
+  const page = await browser.newPage();
+  try {
+    // Stand in for a browser that refuses cookies on 127.0.0.1: the trade succeeds, but the next call
+    // arrives without the cookie, which the server answers with 401.
+    await page.route("**/api/state", (route) =>
+      route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ error: "no cookie" }) }),
+    );
+    await page.goto(cli.url);
+    await expect(page.getByText(/did not keep qq-setup.s cookie.*Allow cookies for 127\.0\.0\.1/)).toBeVisible();
   } finally {
     cli.proc.kill();
     await page.close();

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, CircleCheck, Copy, TriangleAlert } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +14,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Spinner } from "@/components/ui/spinner";
 import {
   api,
+  ApiError,
   keyFromHash,
   KIND_LABELS,
   STARTER_LABELS,
@@ -26,18 +27,36 @@ import { isBlankRepo, isName, parseRepo } from "@/cli/names.mjs";
 
 type Mode = "repos" | "tools";
 
-// The key lives in the fragment of the link the terminal printed. undefined while prerendering.
-function subscribeHash(onChange: () => void) {
-  window.addEventListener("hashchange", onChange);
-  return () => window.removeEventListener("hashchange", onChange);
+// "pending" while prerendering and until the server answers; "none" when this tab holds neither
+// the link's unused key nor the session it was traded for.
+type Session = "pending" | "ready" | "none";
+
+// What happened to the link's key: traded by this tab, refused (already used), or there was none.
+type Opened = "traded" | "refused" | "nokey";
+
+// Started once per page load, outside React, so a re-run effect never races its own key trade.
+let opened: Promise<Opened> | null = null;
+function openSession(): Promise<Opened> {
+  if (!opened) {
+    // The key lives in the fragment of the link the terminal printed. Trade it once, and drop it from
+    // the address bar and history. A reload has no key but keeps this tab's session.
+    const key = keyFromHash(window.location.hash);
+    if (key) window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    opened = key
+      ? api.session(key).then(
+          (): Opened => "traded",
+          (e: unknown): Opened | Promise<never> => (e instanceof ApiError && e.status === 403 ? "refused" : Promise.reject(e)),
+        )
+      : Promise.resolve<Opened>("nokey");
+  }
+  return opened;
 }
 
+const NO_COOKIE =
+  "Your browser did not keep qq-setup's cookie, so this page cannot go on. Allow cookies for 127.0.0.1 and run the command again.";
+
 export function SetupForm() {
-  const key = useSyncExternalStore(
-    subscribeHash,
-    () => keyFromHash(window.location.hash),
-    () => undefined,
-  );
+  const [session, setSession] = useState<Session>("pending");
   const [state, setState] = useState<State | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [org, setOrg] = useState<string>("");
@@ -55,7 +74,6 @@ export function SetupForm() {
 
   const chooseOrg = useCallback(
     (login: string) => {
-      if (!key) return;
       latestOrg.current = login;
       setOrg(login);
       setList(null);
@@ -63,38 +81,57 @@ export function SetupForm() {
       setError(null);
       setLoadingRepos(true);
       api
-        .repos(key, login)
+        .repos(login)
         .then(
           (l) => latestOrg.current === login && setList(l),
           (e: Error) => latestOrg.current === login && setError(e.message),
         )
         .finally(() => latestOrg.current === login && setLoadingRepos(false));
     },
-    [key],
+    [],
   );
 
   useEffect(() => {
-    if (!key) return;
-    api.state(key).then(
-      (s) => {
-        setState(s);
-        const usable = s.orgs.filter((o) => o.usable);
-        if (usable.length === 0) setMode("tools");
-        if (usable.length === 1) chooseOrg(usable[0].login);
-      },
-      (e: Error) => setError(e.message),
-    );
-  }, [key, chooseOrg]);
+    let live = true;
+    openSession()
+      .then((how) =>
+        api.state().catch((e: unknown) => {
+          // The trade worked, yet the cookie did not come back: the browser refused to store it.
+          if (how === "traded" && e instanceof ApiError && e.status === 401) throw new Error(NO_COOKIE);
+          throw e;
+        }),
+      )
+      .then(
+        (s) => {
+          if (!live) return;
+          setState(s);
+          setSession("ready");
+          const usable = s.orgs.filter((o) => o.usable);
+          if (usable.length === 0) setMode("tools");
+          if (usable.length === 1) chooseOrg(usable[0].login);
+        },
+        (e: Error) => {
+          if (!live) return;
+          if (e instanceof ApiError && e.status === 401) setSession("none");
+          else setError(e.message);
+        },
+      );
+    return () => {
+      live = false;
+    };
+  }, [chooseOrg]);
 
-  if (key === undefined) return null;
-  if (key === null) {
+  if (session === "pending" && !error) return null;
+  if (session === "none") {
     return (
       <Alert variant="destructive">
         <TriangleAlert />
         <AlertTitle>Open this page from your terminal</AlertTitle>
         <AlertDescription>
           Run <code className="font-mono break-all">npx --allow-remote=root https://codeload.github.com/quirq-ai/setup/tar.gz/&lt;commit&gt;</code> and
-          use the link it prints.
+          use the link it prints. Each link works in one tab only. If it was already opened, go back to that
+          tab, or run the command again for a new link. If you did not open it anywhere else, stop the command
+          with Ctrl-C.
         </AlertDescription>
       </Alert>
     );
@@ -133,11 +170,10 @@ export function SetupForm() {
   const canSend = !sending && !why;
 
   async function send() {
-    if (!key) return;
     setSending(true);
     setError(null);
     try {
-      await api.submit(key, {
+      await api.submit({
         org,
         repos: [...picked],
         starter: starterOn ? { name: starterName, kind: starterKind } : null,
@@ -157,11 +193,10 @@ export function SetupForm() {
     !isBlankRepo(workRepo) && !repoForTools ? "Write it as owner/name, like quirq-ai/innernet." : null;
 
   async function sendTools() {
-    if (!key) return;
     setSending(true);
     setError(null);
     try {
-      await api.submit(key, { mode: "tools", repo: repoForTools });
+      await api.submit({ mode: "tools", repo: repoForTools });
       setDone("tools");
     } catch (e) {
       setError((e as Error).message);

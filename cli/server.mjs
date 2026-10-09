@@ -1,6 +1,14 @@
 // @ts-check
 // The form's local server. It listens on 127.0.0.1 only, serves the static form from out/, and
-// answers /api/* only to a page that holds the one-time key from the link the terminal printed.
+// answers /api/* only to the one tab that traded the link's key for a session.
+// The key is single-use: POST /api/session swaps it for two secrets, so a key seen later (a
+// browser's argv, history, a shoulder) opens nothing:
+//   - an HttpOnly, SameSite=Strict cookie, which page scripts cannot read;
+//   - a token in the response body, which the page keeps in sessionStorage (scoped to this
+//     scheme, host and port, and to the one tab) and sends as the x-qq-setup header.
+// Every other /api/* call needs both. Browsers send cookies to every port on 127.0.0.1, so the
+// cookie alone could leak to another local listener; the token never does. A custom header also
+// means no other origin can call without a CORS preflight, which this server never answers.
 // The GitHub token never reaches the page: the page only sees names the command already read.
 
 import { randomBytes, timingSafeEqual } from "node:crypto";
@@ -43,12 +51,16 @@ const MAX_BODY = 16 * 1024;
 
 /**
  * Start the form server. Resolves once it listens.
- * @param {{ root: string, handlers: Handlers, port?: number }} opts
+ * @param {{ root: string, handlers: Handlers, port?: number, onSession?: () => void, onRefusedTrade?: () => void }} opts
+ *   onSession runs once, when a page has traded the key; onRefusedTrade runs on each later try.
  * @returns {Promise<{ url: string, key: string, port: number, close: () => void }>}
  */
-export async function startServer({ root, handlers, port = 0 }) {
+export async function startServer({ root, handlers, port = 0, onSession = () => {}, onRefusedTrade = () => {} }) {
   const key = randomBytes(24).toString("base64url");
   const keyBuf = Buffer.from(key);
+  /** The cookie's value and the header token, once the key has been used; until then nothing opens /api/*. */
+  /** @type {{ cookie: Buffer, token: Buffer } | null} */
+  let session = null;
   const outRoot = resolve(root);
   /** @type {number} */
   let boundPort = 0;
@@ -60,12 +72,35 @@ export async function startServer({ root, handlers, port = 0 }) {
       const url = new URL(req.url ?? "/", `http://127.0.0.1:${boundPort}`);
 
       if (url.pathname.startsWith("/api/")) {
-        const given = Buffer.from(String(req.headers["x-qq-setup-key"] ?? ""));
-        if (given.length !== keyBuf.length || !timingSafeEqual(given, keyBuf)) {
-          return send(res, 403, { error: "this page is not the one the terminal opened; use the link it printed" });
-        }
         const origin = req.headers.origin;
-        if (origin !== undefined && origin !== `http://127.0.0.1:${boundPort}`) return send(res, 403, { error: "wrong origin" });
+        const ours = `http://127.0.0.1:${boundPort}`;
+        if (origin !== undefined && origin !== ours) return send(res, 403, { error: "wrong origin" });
+        // A custom header: another origin cannot send it without a CORS preflight, which gets a 404.
+        const header = String(req.headers["x-qq-setup"] ?? "");
+        if (!header) return send(res, 403, { error: "missing x-qq-setup header" });
+        const cookieName = `qq_setup_${boundPort}`;
+
+        if (url.pathname === "/api/session") {
+          if (req.method !== "POST" || origin !== ours || header !== "1") return send(res, 403, { error: "wrong origin" });
+          const given = Buffer.from(String(req.headers["x-qq-setup-key"] ?? ""));
+          if (session || given.length !== keyBuf.length || !timingSafeEqual(given, keyBuf)) {
+            if (session) onRefusedTrade();
+            return send(res, 403, { error: "this link was already used, or is not the one the terminal printed" });
+          }
+          const cookie = randomBytes(32).toString("base64url");
+          const token = randomBytes(32).toString("base64url");
+          session = { cookie: Buffer.from(cookie), token: Buffer.from(token) };
+          onSession();
+          return send(res, 200, { ok: true, token }, {
+            "Set-Cookie": `${cookieName}=${cookie}; Path=/api; HttpOnly; SameSite=Strict`,
+          });
+        }
+
+        const s = session;
+        if (!s || !same(Buffer.from(header), s.token) || !readCookies(req.headers.cookie, cookieName).some((c) => same(c, s.cookie))) {
+          return send(res, 401, { error: "this page is not the one the terminal opened; use the link it printed" });
+        }
+        if (req.method === "POST" && origin !== ours) return send(res, 403, { error: "wrong origin" });
 
         if (req.method === "GET" && url.pathname === "/api/state") return send(res, 200, await handlers.state());
         if (req.method === "GET" && url.pathname === "/api/repos") {
@@ -170,10 +205,34 @@ async function serveStatic(res, outRoot, pathname, head) {
   res.end(head ? undefined : body);
 }
 
-/** @param {import("node:http").ServerResponse} res @param {number} status @param {unknown} body */
-function send(res, status, body) {
+/**
+ * Every value sent for one cookie name. A page on another port can set a same-named cookie with a
+ * longer path, which browsers send first, so taking only the first would lock the real page out.
+ * @param {string | undefined} header @param {string} name
+ */
+function readCookies(header, name) {
+  /** @type {Buffer[]} */
+  const out = [];
+  for (const part of String(header ?? "").split(";")) {
+    const eq = part.indexOf("=");
+    if (eq > 0 && part.slice(0, eq).trim() === name) out.push(Buffer.from(part.slice(eq + 1).trim()));
+  }
+  return out;
+}
+
+/** Constant-time equality for secrets of any length. @param {Buffer} a @param {Buffer} b */
+function same(a, b) {
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+/**
+ * @param {import("node:http").ServerResponse} res @param {number} status @param {unknown} body
+ * @param {Record<string, string>} [extra]  more headers
+ */
+function send(res, status, body, extra = {}) {
   if (res.headersSent) return;
   res.writeHead(status, {
+    ...extra,
     ...SECURITY_HEADERS,
     "Content-Type": "application/json",
     "Cache-Control": "no-store",
