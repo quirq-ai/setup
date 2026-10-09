@@ -1,5 +1,5 @@
-# The three install commands in quirq-ai/docs content/docs/qq.mdx at e67769e86a29e20a83e14e2744ba79897e3c9f20,
+# The three install commands in quirq-ai/docs content/docs/qq.mdx at 8c45d60532d81361f0c7c3e7e55d3b1738343b68,
 # lines 84, 88 and 92, copied unchanged. cli/tools.mjs must print exactly these; update both together.
 ( set -e; mkdir -p ~/qq-tools; rm -rf ~/qq-tools/depot; git clone -q https://github.com/quirq-ai/qq ~/qq-tools/depot; ~/qq-tools/depot/bin/qq --version )
-( set -e; mkdir -p ~/qq-tools; rm -rf ~/qq-tools/qqsync; python3 -m venv ~/qq-tools/qqsync; ~/qq-tools/qqsync/bin/pip install -q --disable-pip-version-check "qqsync @ git+https://github.com/quirq-ai/sync@9f4c77ebe2c81d6ffd643d737a35b962f6fd322a"; ~/qq-tools/qqsync/bin/qqsync --version )
+( set -e; mkdir -p ~/qq-tools; rm -rf ~/qq-tools/qqsync; python3 -m venv ~/qq-tools/qqsync; ~/qq-tools/qqsync/bin/pip install -q --disable-pip-version-check "qqsync @ git+https://github.com/quirq-ai/sync@aecb0fdb89f0d88b61a26052f5b3c26c48392841"; ~/qq-tools/qqsync/bin/qqsync --version )
 ( case "$SHELL:$(uname)" in */bash:Darwin) for rc in ~/.bash_profile ~/.bash_login ~/.profile ~/.bash_profile; do [ -f "$rc" ] && break; done ;; */bash:*) rc=~/.bashrc ;; *) rc=~/.zshrc ;; esac; mkdir -p ~/qq-tools/bin && ln -sf ~/qq-tools/depot/bin/qq ~/qq-tools/qqsync/bin/qqsync ~/qq-tools/bin/ && { grep -qs 'qq-tools/bin:' "$rc" || printf '\nexport PATH="$HOME/qq-tools/bin:$PATH"\n' >> "$rc"; } && echo "qq-tools/bin is on PATH in $rc; open a new terminal" )
