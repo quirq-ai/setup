@@ -1,7 +1,7 @@
 // @ts-check
 // The second way in: put qq on this machine and work on a repo that already uses it. qq-setup only
 // prints these commands; it runs none of them. They are copied from the qq guide
-// (quirq-ai/docs content/docs/qq.mdx, "Use qq on your machine", at e67769e); change both together,
+// (quirq-ai/docs content/docs/qq.mdx, "Use qq on your machine", at bb9a832); change both together,
 // with tests/fixtures/qq-guide-install.txt.
 
 import { isBlankRepo, parseRepo } from "./names.mjs";
@@ -14,7 +14,7 @@ export const INSTALL = [
   },
   {
     what: "Install qqsync (pinned to the sync commit qq itself pins)",
-    cmd: "( set -e; mkdir -p ~/qq-tools; rm -rf ~/qq-tools/qqsync; python3 -m venv ~/qq-tools/qqsync; ~/qq-tools/qqsync/bin/pip install -q --disable-pip-version-check \"qqsync @ git+https://github.com/quirq-ai/sync@9f4c77ebe2c81d6ffd643d737a35b962f6fd322a\"; ~/qq-tools/qqsync/bin/qqsync --version )",
+    cmd: "( set -e; mkdir -p ~/qq-tools; rm -rf ~/qq-tools/qqsync; python3 -m venv ~/qq-tools/qqsync; ~/qq-tools/qqsync/bin/pip install -q --disable-pip-version-check \"qqsync @ git+https://github.com/quirq-ai/sync@aecb0fdb89f0d88b61a26052f5b3c26c48392841\"; ~/qq-tools/qqsync/bin/qqsync --version )",
   },
   {
     what: "Put both on your PATH (adds one line to ~/.bashrc for bash, to ~/.zshrc otherwise, and on a Mac to the first of ~/.bash_profile, ~/.bash_login or ~/.profile that bash already reads; open a new terminal afterwards)",
