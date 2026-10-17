@@ -31,7 +31,7 @@ opens no pull request, changes no setting and installs nothing. The version that
 2. **Opens a form** on `127.0.0.1` (link printed in the terminal; `--no-browser` only prints it).
    It asks what you want to do:
    - **Install qq on my machine and work on a repo.** The terminal prints the three commands from the
-     [qq guide](https://docs.quirq.dev/docs/qq) that install `qq` and `qqsync` and put them on your
+     [qq guide](https://docs.quirq.dev/docs/install) that install `qq` and `qqsync` and put them on your
      `PATH`, then `qq fetch https://github.com/<owner>/<name>` for the repo you name (`git clone` on a Mac),
      and what `qq sync`, `qq build`, `qq test` and `qq run` do (on a Mac, `qq build`, `qq test` and
      `qq run`, with the caveat under "On a Mac"). It runs none of them. To push
@@ -93,7 +93,7 @@ qq run uses your PATH.
 
 So on a Mac the form and terminal show `git clone` instead of `qq fetch`, leave out
 `qq sync`, and list `qq build`, `qq test` and `qq run`. See the
-[qq guide](https://docs.quirq.dev/docs/qq). The CI workflows qq sets up for a repo run on
+[qq guide](https://docs.quirq.dev/docs/install). The CI workflows qq sets up for a repo run on
 GitHub's Linux runners, whatever machine you work on.
 
 ## Develop

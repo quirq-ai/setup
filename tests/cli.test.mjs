@@ -361,10 +361,18 @@ test("checkTools: only mode and an owner/name repo get through", () => {
   assert.equal(checkTools({ mode: "repos" }).ok, false);
 });
 
-test("the install commands are the qq guide's, byte for byte", async () => {
-  const fixture = (await readFile(new URL("./fixtures/qq-guide-install.txt", import.meta.url), "utf8"))
-    .split("\n").filter((l) => l && !l.startsWith("#"));
-  assert.deepEqual(INSTALL.map((s) => s.cmd), fixture);
+test("the install commands are the qq guide's, byte for byte, at the docs commit tools.mjs names", async () => {
+  const text = await readFile(new URL("./fixtures/qq-guide-install.txt", import.meta.url), "utf8");
+  // Two header lines naming the docs file, commit and lines, then exactly the three commands.
+  const [head1, head2, ...cmds] = text.replace(/\n$/, "").split("\n");
+  const at = head1.match(/^# The three install commands in quirq-ai\/docs (\S+) at ([0-9a-f]{40}),$/);
+  assert.ok(at, "fixture line 1 must name the docs file and full commit");
+  assert.match(head2, /^# lines \d+, \d+ and \d+, copied unchanged\./);
+  assert.deepEqual(INSTALL.map((s) => s.cmd), cmds);
+  // cli/tools.mjs's header must name the same file and commit as the fixture.
+  const tools = readFileSync(new URL("../cli/tools.mjs", import.meta.url), "utf8");
+  assert.ok(tools.includes(`(quirq-ai/docs ${at[1]}, `), `cli/tools.mjs must name ${at[1]}`);
+  assert.ok(tools.includes(` at ${at[2].slice(0, 7)}); `), `cli/tools.mjs must name docs commit ${at[2].slice(0, 7)}`);
 });
 
 test("the README says the same about macOS as the page and the terminal", () => {
