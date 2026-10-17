@@ -16,7 +16,7 @@ import { checks } from "../cli/preflight.mjs";
 import { listRepos } from "../cli/facts.mjs";
 import { classicFromError, protectionWarnings } from "../cli/protection.mjs";
 import { isBlankRepo, normalizeRepo, parseRepo } from "../cli/names.mjs";
-import { checkTools, commandsFor, getLine, INSTALL, MAC, toolsText } from "../cli/tools.mjs";
+import { checkTools, commandsFor, getLine, INSTALL, installFor, MAC, MAC_PYTHON, toolsText } from "../cli/tools.mjs";
 import { openerBase, writeOpener } from "../cli/opener.mjs";
 import { startServer } from "../cli/server.mjs";
 
@@ -131,7 +131,7 @@ test("buildPlan names every write, and what v0 leaves out", () => {
 
 test("preflight checks: token variables, scopes, Python and macOS", () => {
   const base = { node: "v24.1.0", platform: "linux", env: {}, git: "git version 2.50", gh: "gh version 2.89",
-    python: "Python 3.14.8", login: "sam", scopes: ["repo", "workflow", "read:org", "gist"], loginError: null };
+    python: "Python 3.14.8", pythonCmd: "python3", login: "sam", scopes: ["repo", "workflow", "read:org", "gist"], loginError: null };
   assert.ok(checks(base).every((c) => c.ok));
 
   const tok = checks({ ...base, env: { GH_TOKEN: "x" } }).find((c) => c.name === "No token variables");
@@ -149,8 +149,14 @@ test("preflight checks: token variables, scopes, Python and macOS", () => {
   for (const c of checks(base)) assert.doesNotMatch(c.detail, /admin:org|delete_repo|-s gist/);
 
   const mac = checks({ ...base, platform: "darwin", python: "Python 3.9.6" });
-  assert.match(mac.find((c) => c.name === "Python 3.11+")?.detail ?? "", /brew install python@3\.14/);
-  assert.equal(mac.find((c) => c.name === "Python 3.11+")?.fatal, false);
+  const macPy = mac.find((c) => c.name === "Python 3.11.4+");
+  assert.equal(macPy?.ok, false);
+  assert.equal(macPy?.fatal, false);
+  assert.ok(macPy?.detail.includes(MAC_PYTHON.cmd), "a Mac with python3 3.9 is told the qq guide's Python step");
+  // qq runs QQ_PYTHON when it is set, so that is the Python checked; 3.11.0 to 3.11.3 are too old for qq.
+  const viaEnv = checks({ ...base, platform: "darwin", env: { QQ_PYTHON: "python3.13" }, pythonCmd: "python3.13", python: "Python 3.13.16" });
+  assert.equal(viaEnv.find((c) => c.name === "Python 3.11.4+")?.detail, "Python 3.13.16 (python3.13, from QQ_PYTHON)");
+  assert.equal(checks({ ...base, python: "Python 3.11.2" }).find((c) => c.name === "Python 3.11.4+")?.ok, false);
   assert.match(mac.find((c) => c.name === "macOS")?.detail ?? "", /Linux x86_64 only.*no pin for platform.*clone with git.*--toolchain NAME=ROOT/);
 
   assert.equal(checks({ ...base, node: "v20.11.0" })[0].ok, false);
@@ -363,12 +369,12 @@ test("checkTools: only mode and an owner/name repo get through", () => {
 
 test("the install commands are the qq guide's, byte for byte, at the docs commit tools.mjs names", async () => {
   const text = await readFile(new URL("./fixtures/qq-guide-install.txt", import.meta.url), "utf8");
-  // Two header lines naming the docs file, commit and lines, then exactly the three commands.
+  // Two header lines naming the docs file, commit and lines, then exactly the commands, a Mac's Python step first.
   const [head1, head2, ...cmds] = text.replace(/\n$/, "").split("\n");
-  const at = head1.match(/^# The three install commands in quirq-ai\/docs (\S+) at ([0-9a-f]{40}),$/);
+  const at = head1.match(/^# The install commands in quirq-ai\/docs (\S+) at ([0-9a-f]{40}),$/);
   assert.ok(at, "fixture line 1 must name the docs file and full commit");
-  assert.match(head2, /^# lines \d+, \d+ and \d+, copied unchanged\./);
-  assert.deepEqual(INSTALL.map((s) => s.cmd), cmds);
+  assert.match(head2, /^# lines \d+, \d+, \d+ and \d+, copied unchanged /);
+  assert.deepEqual(installFor("darwin").map((s) => s.cmd), cmds);
   // cli/tools.mjs's header must name the same file and commit as the fixture.
   const tools = readFileSync(new URL("../cli/tools.mjs", import.meta.url), "utf8");
   assert.ok(tools.includes(`(quirq-ai/docs ${at[1]}, `), `cli/tools.mjs must name ${at[1]}`);
@@ -387,6 +393,9 @@ test("toolsText: install commands, then the line that gets the repo for this pla
   assert.doesNotMatch(linux, /no pin for platform/);
   const mac = toolsText("quirq-ai/innernet", "darwin").join("\n");
   assert.match(mac, /git clone https:\/\/github\.com\/quirq-ai\/innernet\n/);
+  // On a Mac the Python step comes first; Linux does not get it.
+  assert.ok(mac.indexOf(MAC_PYTHON.cmd) > 0 && mac.indexOf(MAC_PYTHON.cmd) < mac.indexOf(INSTALL[0].cmd));
+  assert.ok(!linux.includes(MAC_PYTHON.cmd));
   assert.doesNotMatch(mac, /qq fetch https/);
   assert.match(mac, /qq fetch clones the repo and then stops with "no pin for platform"/);
   assert.match(mac, /--toolchain NAME=ROOT or your PATH, and still check the pinned versions \(exact Python, Node major\); qq run uses your PATH/);
@@ -399,7 +408,7 @@ test("toolsText: install commands, then the line that gets the repo for this pla
   assert.ok(commandsFor("darwin").use.every((u) => !u.cmd.startsWith("qq sync")));
   assert.equal(getLine(null, "linux"), "qq fetch https://github.com/OWNER/NAME");
   // zsh-safe: no comment or history characters in anything a person pastes.
-  for (const s of INSTALL) assert.doesNotMatch(s.cmd, /[#!]/);
+  for (const s of installFor("darwin")) assert.doesNotMatch(s.cmd, /[#!]/);
 });
 
 /** Run the real CLI against the fake gh and return its link, output and exit. */

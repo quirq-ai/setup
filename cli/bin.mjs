@@ -15,7 +15,7 @@ import { preflight } from "./preflight.mjs";
 import { protectionWarnings, readProtection } from "./protection.mjs";
 import { openerBase, openFile, writeOpener } from "./opener.mjs";
 import { startServer } from "./server.mjs";
-import { ACCESS, checkTools, INSTALL, MAC, NEEDS, toolsText, commandsFor } from "./tools.mjs";
+import { ACCESS, checkTools, installFor, MAC, NEEDS, toolsText, commandsFor } from "./tools.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
@@ -122,7 +122,7 @@ async function main(argv = process.argv.slice(2)) {
     },
     handlers: {
       state: async () => (touch(), { version: pkg.version, readOnly: true, login, orgs, platform: process.platform,
-        tools: { install: INSTALL, ...commandsFor(process.platform), needs: NEEDS, mac: MAC, access: ACCESS } }),
+        tools: { install: installFor(process.platform), ...commandsFor(process.platform), needs: NEEDS, mac: MAC, access: ACCESS } }),
       repos: async (org) => {
         touch();
         const o = orgs.find((x) => x.login === org);

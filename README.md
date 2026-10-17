@@ -23,16 +23,16 @@ opens no pull request, changes no setting and installs nothing. The version that
 ## What it does
 
 1. **Checks** Node 22+ (CI tests 22 and 24; qq's own toolchain is Node 24), `git`, `gh` (logged in with the `repo` and `read:org` scopes, which
-   `gh auth login` grants) and Python 3.11+ (the setup step will run infra-config's generator and
-   gate). It notes that the setup step will also need the `workflow` scope, and how to remove it
+   `gh auth login` grants) and Python 3.11.4+ (`QQ_PYTHON` if set, else `python3`: qq runs that one, and the setup step will
+   run infra-config's generator and gate). It notes that the setup step will also need the `workflow` scope, and how to remove it
    afterwards. It never asks for `admin:org`, `delete_repo` or `gist`. It refuses to run while
    `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN` or `GITHUB_ENTERPRISE_TOKEN` is set, so it
    only ever acts as your own `gh` login.
 2. **Opens a form** on `127.0.0.1` (link printed in the terminal; `--no-browser` only prints it).
    It asks what you want to do:
-   - **Install qq on my machine and work on a repo.** The terminal prints the three commands from the
+   - **Install qq on my machine and work on a repo.** The terminal prints the commands from the
      [qq guide](https://docs.quirq.dev/docs/install) that install `qq` and `qqsync` and put them on your
-     `PATH`, then `qq fetch https://github.com/<owner>/<name>` for the repo you name (`git clone` on a Mac),
+     `PATH` (on a Mac, its Python step first), then `qq fetch https://github.com/<owner>/<name>` for the repo you name (`git clone` on a Mac),
      and what `qq sync`, `qq build`, `qq test` and `qq run` do (on a Mac, `qq build`, `qq test` and
      `qq run`, with the caveat under "On a Mac"). It runs none of them. To push
      branches to the repo, an owner gives you Write access. A login that owns no org starts here.
@@ -81,8 +81,9 @@ request from the form for 30 minutes), 2 error. Ctrl-C stops it by signal, which
 
 ## On a Mac
 
-It works the same. macOS ships Python 3.9, so the later setup step needs a newer one
-(`brew install python@3.14`), as does installing qq. The form, the terminal and this section say the
+It works the same. macOS ships Python 3.9, too old for qq, so on a Mac the install commands start
+with the qq guide's Python step: `brew install python@3.13`, `export QQ_PYTHON=python3.13` in
+`~/.zshrc`, and a new terminal. About toolchains, the form, the terminal and this section say the
 same thing:
 
 qq fetches toolchains for Linux x86_64 only, so on a Mac qq fetch clones the repo and then stops with

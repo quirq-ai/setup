@@ -27,6 +27,9 @@ jobs:
       - name: Install
         run: npm ci
 
+      - name: The install commands match the qq guide
+        run: node scripts/check-guide.mjs
+
       - name: Committed form matches its source (npx runs out/ as committed)
         run: npm run check-form
 
