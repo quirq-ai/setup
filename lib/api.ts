@@ -46,6 +46,8 @@ export type Machine = {
   platform: string;
   pin: string;
   running: boolean;
+  // The signature of this look: a plan is made only while the machine still matches it.
+  seen: string;
   demo: string[];
   qq: MachineTool & { localWork: string | null; pythonLine: { line: string; files: string[] } | null };
   xo: MachineTool & { foreign: boolean; note: string | null };
@@ -85,6 +87,8 @@ export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    // The machine no longer matches what the page shows: look again.
+    readonly changed = false,
   ) {
     super(message);
   }
@@ -119,7 +123,8 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   }
   const error = body && typeof body === "object" && "error" in body ? String((body as { error: unknown }).error) : null;
   if (!res.ok || error) {
-    throw new ApiError(error ?? `qq-setup answered ${res.status}. Is it still running in your terminal?`, res.status);
+    const changed = !!body && typeof body === "object" && "changed" in body && body.changed === true;
+    throw new ApiError(error ?? `qq-setup answered ${res.status}. Is it still running in your terminal?`, res.status, changed);
   }
   return body as T;
 }
@@ -141,11 +146,11 @@ export const api = {
   state: () => call<State>("/api/state"),
   repos: (org: string) => call<RepoList>(`/api/repos?org=${encodeURIComponent(org)}`),
   machine: () => call<Machine>("/api/machine"),
-  plan: (choice: Choice) =>
+  plan: (choice: Choice, seen: string) =>
     call<Plan>("/api/machine/plan", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(choice),
+      body: JSON.stringify({ ...choice, seen }),
     }),
   run: (id: string) =>
     call<{ ok: true; id: string }>("/api/machine/run", {

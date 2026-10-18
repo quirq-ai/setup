@@ -1,10 +1,11 @@
 // @ts-check
 // The form's "This machine" panel: the same install, update and remove as `qq-setup install`
 // (cli/install.mjs), chosen on the page and run here. The page never sends a command. It sends a
-// choice per tool, which must be one the tool's state offers (choices()). The server turns it into
-// steps with planSteps and keeps that plan. A run takes only the id of the latest plan. Before
-// running, it looks at the machine again, and it refuses when the same choice now gives different
-// steps, so the guarantees the page showed (local work kept, nothing removed unless chosen) still hold.
+// choice per tool, which must be one the tool's state offers (choices()), with the signature of the
+// look it is showing. The server turns it into steps with planSteps and keeps that plan. A run takes
+// only the id of the latest plan. Planning refuses when the machine no longer matches what the page
+// shows, and running refuses when it no longer matches the plan or the steps differ, so the
+// guarantees the page showed (local work kept, nothing removed unless chosen) still hold.
 
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -38,6 +39,11 @@ export function machine({ home, env, platform, run = read, runStep: step = piped
   let plan = null;
   /** @type {Run | null} */
   let current = null;
+  // Set from a run's first check to its first step, so nothing else plans or starts in between.
+  let starting = false;
+  // Each plan request's number: only the newest one started is kept (choices can overlap).
+  let planSeq = 0;
+  const busy = () => starting || (!!current && !current.done);
 
   const look = () => detect({ home, latest, run });
   const demoHere = () => DEMO.filter((d) => existsSync(join(home, d)));
@@ -56,7 +62,8 @@ export function machine({ home, env, platform, run = read, runStep: step = piped
       return {
         platform,
         pin: XO_PIN,
-        running: !!current && !current.done,
+        running: busy(),
+        seen: seen(s),
         demo: demoHere(),
         qq: { line: qqLine, choices: choices(s.qq), installed: s.qq.installed, broken: s.qq.broken, localWork: s.qq.localWork,
           pythonLine: s.qq.pythonLine },
@@ -66,10 +73,21 @@ export function machine({ home, env, platform, run = read, runStep: step = piped
 
     /** Check a choice and turn it into steps; the plan kept is the one a run may start. @param {unknown} body */
     async plan(body) {
+      if (busy()) return { ok: false, status: 409, error: "a run is going: wait for it to finish" };
+      const n = ++planSeq;
+      // The look the page is showing, which its warnings came from; the rest is the choice.
+      const { seen: shown, ...rest } = body && typeof body === "object" && !Array.isArray(body) ? /** @type {Record<string, unknown>} */ (body) : { seen: null };
       const s = await look();
-      const c = checkChoice(body, s, demoHere());
+      if (n !== planSeq) return { ok: false, status: 409, error: "a newer choice replaced this one" };
+      if (busy()) return { ok: false, status: 409, error: "a run is going: wait for it to finish" };
+      if (typeof shown !== "string" || shown !== seen(s)) {
+        plan = null;
+        return { ok: false, status: 409, changed: true, error: "this machine changed since the page looked at it: here is what is there now" };
+      }
+      const c = checkChoice(rest, s, demoHere());
       if (!c.ok) return c;
       const p = await stepsFor(s, c.choice);
+      if (n !== planSeq) return { ok: false, status: 409, error: "a newer choice replaced this one" };
       if (p.stop) {
         plan = null;
         return { ok: /** @type {const} */ (true), id: null, steps: [], stop: p.stop, notes: [] };
@@ -80,59 +98,19 @@ export function machine({ home, env, platform, run = read, runStep: step = piped
 
     /** Run the latest plan, by its id, once. @param {unknown} body */
     async start(body) {
-      if (current && !current.done) return { ok: false, status: 409, error: "a run is already going" };
+      if (busy()) return { ok: false, status: 409, error: "a run is already going" };
       const id = body && typeof body === "object" && "id" in body ? body.id : null;
       if (!plan || typeof id !== "string" || id !== plan.id || Object.keys(/** @type {object} */ (body)).length !== 1) {
         return { ok: false, status: 409, error: "that is not the latest plan: review the plan again" };
       }
       const kept = plan;
       plan = null; // one run per plan
-      // Look again: the same choice must still give the same steps.
-      const s = await look();
-      const c = checkChoice(kept.choice, s, demoHere());
-      const p = c.ok ? await stepsFor(s, c.choice) : null;
-      if (!c.ok || !p || p.stop || seen(s) !== kept.seen || p.steps.map((x) => x.cmd).join("\n") !== kept.cmds.join("\n")) {
-        return { ok: false, status: 409, error: "something changed on this machine since the plan was made: review the plan again" };
+      starting = true;
+      try {
+        return await begin(kept);
+      } finally {
+        starting = false;
       }
-      if (!p.steps.length) return { ok: false, status: 409, error: "nothing to run" };
-      /** @type {Run} */
-      const r = { id: kept.id, steps: p.steps, status: p.steps.map(() => ({ status: "pending" })), log: "", truncated: false,
-        done: false, code: null, notes: [] };
-      current = r;
-      const add = (/** @type {string} */ text) => {
-        echo(text);
-        if (r.truncated) return;
-        const clean = text.replace(ANSI, "");
-        if (r.log.length + clean.length > MAX_LOG) {
-          r.log += clean.slice(0, MAX_LOG - r.log.length);
-          r.log += "\n[output cut here; the rest is in the terminal]\n";
-          r.truncated = true;
-        } else r.log += clean;
-      };
-      void (async () => {
-        try {
-          for (const [i, st] of r.steps.entries()) {
-            r.status[i] = { status: "running" };
-            add(`\n[${i + 1}/${r.steps.length}] ${st.what}\n$ ${st.cmd}\n`);
-            const code = await step(st.cmd, p.env, add);
-            r.status[i] = { status: code === 0 ? "ok" : "failed", code };
-            if (code !== 0) {
-              add(`\nstep ${i + 1} exited ${code}; the steps after it did not run. Fix it, then run it again (every step is safe to run again).\n`);
-              r.code = 2;
-              return;
-            }
-          }
-          r.code = 0;
-          r.notes = afterNotes({ qq: kept.choice.qq, xo: kept.choice.xo }, home);
-          if (kept.choice.xo === "install") r.notes.push("Open a new terminal, then log xo in with your XO API key:  xo login");
-        } catch (e) {
-          add(`\n${e instanceof Error ? e.message : String(e)}\n`);
-          r.code = 2;
-        } finally {
-          r.done = true;
-        }
-      })();
-      return { ok: /** @type {const} */ (true), id: r.id };
     },
 
     /** The run's progress, with the log from character `from`. @param {number} from */
@@ -144,9 +122,60 @@ export function machine({ home, env, platform, run = read, runStep: step = piped
         log: r.log.slice(at), next: r.log.length, done: r.done, code: r.code, notes: r.notes } };
     },
 
-    /** True while a run is going: the form must not stop under it. */
-    busy: () => !!current && !current.done,
+    /** True while a run is starting or going: the form must not stop under it, and nothing else plans or runs. */
+    busy,
   };
+
+  /** Look again, then run the kept plan's steps in the background. @param {NonNullable<typeof plan>} kept */
+  async function begin(kept) {
+    // Look again: the same choice must still give the same steps.
+    const s = await look();
+    const c = checkChoice(kept.choice, s, demoHere());
+    const p = c.ok ? await stepsFor(s, c.choice) : null;
+    if (!c.ok || !p || p.stop || seen(s) !== kept.seen || p.steps.map((x) => x.cmd).join("\n") !== kept.cmds.join("\n")) {
+      return { ok: false, status: 409, error: "something changed on this machine since the plan was made: review the plan again" };
+    }
+    if (!p.steps.length) return { ok: false, status: 409, error: "nothing to run" };
+    /** @type {Run} */
+    const r = { id: kept.id, steps: p.steps, status: p.steps.map(() => ({ status: "pending" })), log: "", truncated: false,
+      done: false, code: null, notes: [] };
+    current = r;
+    echo("\nRunning the steps picked in the form:\n");
+    const add = (/** @type {string} */ text) => {
+      echo(text);
+      if (r.truncated) return;
+      const clean = text.replace(ANSI, "");
+      if (r.log.length + clean.length > MAX_LOG) {
+        r.log += clean.slice(0, MAX_LOG - r.log.length);
+        r.log += "\n[output cut here; the rest is in the terminal]\n";
+        r.truncated = true;
+      } else r.log += clean;
+    };
+    void (async () => {
+      try {
+        for (const [i, st] of r.steps.entries()) {
+          r.status[i] = { status: "running" };
+          add(`\n[${i + 1}/${r.steps.length}] ${st.what}\n$ ${st.cmd}\n`);
+          const code = await step(st.cmd, p.env, add);
+          r.status[i] = { status: code === 0 ? "ok" : "failed", code };
+          if (code !== 0) {
+            add(`\nstep ${i + 1} exited ${code}; the steps after it did not run. Fix it, then run it again (every step is safe to run again).\n`);
+            r.code = 2;
+            return;
+          }
+        }
+        r.code = 0;
+        r.notes = afterNotes({ qq: kept.choice.qq, xo: kept.choice.xo }, home);
+        if (kept.choice.xo === "install") r.notes.push("Open a new terminal, then log xo in with your XO API key:  xo login");
+      } catch (e) {
+        add(`\n${e instanceof Error ? e.message : String(e)}\n`);
+        r.code = 2;
+      } finally {
+        r.done = true;
+      }
+    })();
+    return { ok: /** @type {const} */ (true), id: r.id };
+  }
 }
 
 /**

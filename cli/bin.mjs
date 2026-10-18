@@ -174,8 +174,8 @@ async function main(argv = process.argv.slice(2)) {
           gotAnswers({ tools: t.repo });
           return { ok: true };
         }
-        const checked = checkAnswers(body, orgs, (o) => listed.get(o));
         if (github) return { ok: false, status: 409, error: `setting up repos needs GitHub: ${github}` };
+        const checked = checkAnswers(body, orgs, (o) => listed.get(o));
         if (!checked.ok) return checked;
         // The form only knows the 100 most recently pushed repos: ask GitHub about the new name itself.
         const st = checked.answers.starter;
@@ -194,9 +194,7 @@ async function main(argv = process.argv.slice(2)) {
           touch();
           if (!here) return { ok: false, status: 409, ...noHome };
           if (accepted) return { ok: false, status: 409, error: "the terminal already has your answers, and the form is closing" };
-          const r = await here.start(body);
-          if (r.ok) console.log("\nRunning the steps picked in the form:");
-          return r;
+          return here.start(body);
         },
         progress: (from) => (touch(), here ? here.progress(from) : noHome),
       },

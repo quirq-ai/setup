@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Spinner } from "@/components/ui/spinner";
 import { Command } from "@/components/command";
-import { api, type Action, type Choice, type Machine, type MachineTool, type Plan, type Progress } from "@/lib/api";
+import { api, type ApiError, type Action, type Choice, type Machine, type MachineTool, type Plan, type Progress } from "@/lib/api";
 
 type Tool = "qq" | "xo";
 type Run = NonNullable<Progress["run"]>;
@@ -38,15 +38,24 @@ export function MachinePanel({ onDone }: { onDone: () => void }) {
   const [starting, setStarting] = useState(false);
   const [closing, setClosing] = useState(false);
   const planFor = useRef("");
+  // The signature of the look on screen: the terminal plans only while the machine still matches it.
+  const seen = useRef("");
+  const reload = useRef<() => Promise<void>>(async () => {});
 
   // Every change of choice asks the terminal for the steps it would run; only the latest answer counts.
   const choose = useCallback((next: Choice) => {
     const key = JSON.stringify(next);
     planFor.current = key;
     setChoice(next);
-    api.plan(next).then(
+    api.plan(next, seen.current).then(
       (p) => planFor.current === key && (setPlanned({ key, plan: p }), setError(null)),
-      (e: Error) => planFor.current === key && setError(e.message),
+      (e: ApiError) => {
+        if (planFor.current !== key) return;
+        if (!e.changed) return setError(e.message);
+        // Something changed on the machine (new local work, say): show what is there now, so every
+        // warning comes from it, and start again from Keep.
+        void reload.current().then(() => setRunError(`${e.message}. Pick again.`));
+      },
     );
   }, []);
 
@@ -54,11 +63,15 @@ export function MachinePanel({ onDone }: { onDone: () => void }) {
   const show = useCallback(
     (s: Machine) => {
       setM(s);
+      seen.current = s.seen;
       choose({ qq: "keep", xo: "keep", demo: [], python: false });
     },
     [choose],
   );
   const load = useCallback(() => api.machine().then(show), [show]);
+  useEffect(() => {
+    reload.current = load;
+  }, [load]);
 
   useEffect(() => {
     let live = true;
@@ -185,7 +198,7 @@ export function MachinePanel({ onDone }: { onDone: () => void }) {
                   checked={choice.python}
                   onCheckedChange={(v) => choose({ ...choice, python: v === true })}
                 />
-                <Label htmlFor="python-line">
+                <Label htmlFor="python-line" className="block leading-snug">
                   Also delete <code className="font-mono">{m.qq.pythonLine.line}</code> from{" "}
                   {m.qq.pythonLine.files.map((f) => `~/${f}`).join(", ")}
                 </Label>

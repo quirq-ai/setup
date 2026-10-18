@@ -354,11 +354,11 @@ test("on a Mac: git clone, the note beside it, and no qq sync", async ({ browser
 });
 
 /** A HOME with xo installed as its quickstart leaves it (a venv whose xo and pip answer), and its PATH line. */
-function homeWithXo(): string {
+function homeWithXo(logout = 'echo "fake xo: logged out"'): string {
   const home = mkdtempSync(join(tmpdir(), "qq-setup-e2e-xo-"));
   mkdirSync(join(home, ".xo", "bin"), { recursive: true });
   writeFileSync(join(home, ".xo", "pyvenv.cfg"), "home = /usr/bin\n");
-  writeFileSync(join(home, ".xo", "bin", "xo"), '#!/bin/sh\ncase "$1" in --version) echo "xo 0.1.0" ;; logout) echo "fake xo: logged out" ;; esac\n', { mode: 0o755 });
+  writeFileSync(join(home, ".xo", "bin", "xo"), `#!/bin/sh\ncase "$1" in --version) echo "xo 0.1.0" ;; logout) ${logout} ;; esac\n`, { mode: 0o755 });
   writeFileSync(join(home, ".xo", "bin", "pip"), `#!/bin/sh\necho "quirq-xo @ git+https://github.com/quirq-ai/xo@${XO_PIN}"\n`, { mode: 0o755 });
   writeFileSync(join(home, ".zshrc"), '\nexport PATH="$HOME/.xo/bin:$PATH"\n');
   return home;
@@ -445,14 +445,110 @@ test("this machine: a ~/.xo that is not xo's is left alone, and the form opens w
     await expect(page.getByRole("radio", { name: "Set up repos in an org I own" })).toBeDisabled();
     await expect(page.getByText(/Needs GitHub, which is not ready/)).toBeVisible();
     // The page cannot ask for what the state does not offer.
-    const res = await page.evaluate(() =>
-      fetch("/api/machine/plan", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-qq-setup": String(sessionStorage.getItem("qq-setup-token")) },
-        body: JSON.stringify({ qq: "keep", xo: "remove" }),
-      }).then((r) => r.status),
-    );
-    expect(res).toBe(400);
+    const seen = (await callApi(page, "/api/machine")).body.seen;
+    const res = await callApi(page, "/api/machine/plan", { qq: "keep", xo: "remove", seen });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/^xo: "remove" is not one of keep$/);
+  } finally {
+    cli.proc.kill();
+    await page.close();
+  }
+});
+
+/** Call the form's API from the page, as the page does (its token, our origin). */
+async function callApi(page: Page, path: string, body?: unknown): Promise<{ status: number; body: Record<string, unknown> }> {
+  return page.evaluate(
+    async ([path, body]) => {
+      const init: RequestInit = { headers: { "x-qq-setup": String(sessionStorage.getItem("qq-setup-token")), "content-type": "application/json" } };
+      if (body !== undefined) Object.assign(init, { method: "POST", body: JSON.stringify(body) });
+      const r = await fetch(path, init);
+      return { status: r.status, body: await r.json() };
+    },
+    [path, body] as const,
+  );
+}
+
+test("this machine: a choice made after the machine changed shows what is there now, and plans nothing", async ({ browser }) => {
+  const home = homeWithXo();
+  const cli = await startCli({ HOME: home, SHELL: "/bin/zsh" });
+  const page = await browser.newPage();
+  try {
+    await page.goto(cli.url);
+    const xo = page.getByRole("radiogroup", { name: "What to do with xo" });
+    await expect(xo.getByRole("radio", { name: "Keep" })).toBeChecked();
+    // Behind the page's back, ~/.xo stops being xo's venv.
+    rmSync(join(home, ".xo", "pyvenv.cfg"));
+    // click, not check: the page looks again at once, and the radio it clicked goes away.
+    await xo.getByRole("radio", { name: "Remove" }).click();
+    await expect(page.getByText(/this machine changed since the page looked at it.*Pick again/)).toBeVisible();
+    await expect(page.getByText("Move ~/.xo away to install xo here; qq-setup leaves it alone.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Run" })).toBeDisabled();
+    expect(existsSync(join(home, ".xo"))).toBe(true);
+  } finally {
+    cli.proc.kill();
+    await page.close();
+  }
+});
+
+test("this machine: the form cannot close under a run, and no run starts once the form has its answer", async ({ browser }) => {
+  const home = homeWithXo('sleep 2; echo "fake xo: logged out"');
+  const cli = await startCli({ HOME: home, SHELL: "/bin/zsh" });
+  const page = await browser.newPage();
+  try {
+    await page.goto(cli.url);
+    await expect(page.getByRole("radiogroup", { name: "What to do with xo" })).toBeVisible();
+    const seen = (await callApi(page, "/api/machine")).body.seen;
+    const plan = await callApi(page, "/api/machine/plan", { xo: "remove", seen });
+    expect(plan.status).toBe(200);
+    expect((await callApi(page, "/api/machine/run", { id: plan.body.id })).status).toBe(200);
+    // While xo logout runs: no answer closes the form, and nothing else plans.
+    const done = await callApi(page, "/api/answers", { mode: "done" });
+    expect(done.status).toBe(409);
+    expect(done.body.error).toMatch(/still running/);
+    expect((await callApi(page, "/api/machine/plan", { xo: "remove", seen })).body.error).toMatch(/a run is going/);
+    await expect.poll(async () => (await callApi(page, "/api/machine/run?from=0")).body.running, { timeout: 15_000 }).toBe(false);
+
+    // Once the form has its answer, a plan made before it cannot run.
+    const seen2 = (await callApi(page, "/api/machine")).body.seen;
+    const late = await callApi(page, "/api/machine/plan", { xo: "install", seen: seen2 });
+    expect(late.status).toBe(200);
+    expect((await callApi(page, "/api/answers", { mode: "done" })).status).toBe(200);
+    const run = await callApi(page, "/api/machine/run", { id: late.body.id });
+    expect(run.status).toBe(409);
+    expect(run.body.error).toMatch(/already has your answers/);
+    expect(await cli.exited).toBe(0);
+    expect(existsSync(join(home, ".xo"))).toBe(false);
+  } finally {
+    cli.proc.kill();
+    await page.close();
+  }
+});
+
+test("this machine: with a relative HOME the panel offers nothing", async ({ browser }) => {
+  const cli = await startCli({ HOME: "relative-home" });
+  const page = await browser.newPage();
+  try {
+    await page.goto(cli.url);
+    await expect(page.getByText("Could not look at this machine")).toBeVisible();
+    await expect(page.getByText(/HOME must be set to an absolute path/)).toBeVisible();
+    const plan = await callApi(page, "/api/machine/plan", { qq: "remove", seen: "" });
+    expect(plan.status).toBe(409);
+    expect(plan.body.error).toMatch(/HOME must be set to an absolute path/);
+  } finally {
+    cli.proc.kill();
+    await page.close();
+  }
+});
+
+test("without a gh login, setting up repos is refused even when asked directly", async ({ browser }) => {
+  const cli = await startCli({ FAKE_GH_NO_LOGIN: "1" });
+  const page = await browser.newPage();
+  try {
+    await page.goto(cli.url);
+    await expect(page.getByRole("radio", { name: "Set up repos in an org I own" })).toBeDisabled();
+    const r = await callApi(page, "/api/answers", { org: "acme-labs", repos: ["web"], starter: null });
+    expect(r.status).toBe(409);
+    expect(r.body.error).toMatch(/^setting up repos needs GitHub: /);
   } finally {
     cli.proc.kill();
     await page.close();

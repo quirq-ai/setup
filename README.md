@@ -132,11 +132,18 @@ at "Install xo?" installs nothing.
   and the fixed text of the install path, never a token. Its answers are checked against those
   names before the terminal uses them.
 - The "This machine" choice never receives a command from the page. The page sends only a choice
-  per tool, which must be one the tool's state offers; qq-setup turns it into steps and keeps that
-  plan under a random id. Run sends only that id, runs the latest plan once, and first looks at the
-  machine again: if anything changed (local work in qq, a tool added or gone), it refuses and the
-  page shows the new state. Steps run with no input from a terminal, one at a time, and stop at the
-  first that fails. Only one run goes at a time, and the form cannot be closed under it.
+  per tool, which must be one the tool's state offers, with the signature of the look it shows;
+  qq-setup plans only while the machine still matches that look (so every warning on the page is
+  current), and keeps the plan under a random id. Run sends only that id, runs the latest plan once,
+  and first looks at the machine again: if anything changed (local work in qq, a tool added or
+  gone, a demo folder or `QQ_PYTHON` line), it refuses and the page shows the new state. Steps run
+  with no input from a terminal, one at a time, and stop at the first that fails. Only one run goes
+  at a time, and the form cannot be closed under it.
+- So the link now does more than read: whoever opens it first can run the steps the page offers,
+  including removing qq even with local work, deleting demo folders ticked on the page and logging
+  xo out. That is why the key works once, never travels on a command line when qq-setup opens the
+  browser, and why the terminal says when the link was used and when someone tries it again: if
+  you did not open it, press Ctrl-C.
 - No telemetry. The page loads nothing from the internet (no web fonts, strict CSP).
 
 ## On a Mac

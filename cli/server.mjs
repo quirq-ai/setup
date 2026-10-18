@@ -53,7 +53,7 @@ const MAX_BODY = 16 * 1024;
  *     progress: (from: number) => unknown,
  *   },
  * }} Handlers
- * @typedef {({ ok: true } & Record<string, unknown>) | { ok: false, error: string, status?: number }} Result
+ * @typedef {({ ok: true } & Record<string, unknown>) | { ok: false, error: string, status?: number, changed?: boolean }} Result
  */
 
 /**
@@ -133,7 +133,8 @@ export async function startServer({ root, handlers, port = 0, onSession = () => 
           }
           const result = await posts[url.pathname](parsed);
           if (result.ok) return send(res, 200, result);
-          return send(res, result.status ?? 400, { ok: false, error: result.error });
+          const { status, ...rest } = result;
+          return send(res, status ?? 400, rest);
         }
         return send(res, 404, { error: "no such endpoint" });
       }
