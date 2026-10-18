@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // @ts-check
-// qq-setup: set up quirq infra (qq) for a GitHub org, or put qq on this machine to work on a repo that
-// already uses it. The terminal checks your tools, a local form in your browser asks which, and the
-// terminal shows the plan or prints the install commands. `qq-setup install` installs, updates or removes
-// qq and xo on this machine (cli/install.mjs), after showing the commands and a yes.
-// IT NEVER WRITES TO GITHUB: it reads GitHub through your gh login. Only `install` changes this machine,
-// in your home directory (and, on a Mac with no new enough Python, Homebrew's folder).
+// qq-setup: set up quirq infra (qq) for a GitHub org, or install, update or remove qq and xo on this
+// machine. The terminal checks your tools and a local form in your browser asks what to do: the form's
+// "This machine" panel runs the install, update or remove steps you pick (cli/machine.mjs), and the
+// terminal shows the plan for an org. `qq-setup install` does the same for this machine in the terminal.
+// IT NEVER WRITES TO GITHUB: it reads GitHub through your gh login. Only the machine steps change this
+// machine, in your home directory (and, on a Mac with no new enough Python, Homebrew's folder).
 
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -16,6 +16,7 @@ import { buildPlan, checkAnswers, CONFIG_REPO } from "./plan.mjs";
 import { preflight } from "./preflight.mjs";
 import { protectionWarnings, readProtection } from "./protection.mjs";
 import { openerBase, openFile, writeOpener } from "./opener.mjs";
+import { machine } from "./machine.mjs";
 import { startServer } from "./server.mjs";
 import { ACCESS, checkTools, installFor, MAC, NEEDS, toolsText, commandsFor } from "./tools.mjs";
 
@@ -24,19 +25,21 @@ const ROOT = join(HERE, "..");
 // The form gives up after 30 minutes with no request from the page.
 const IDLE_MS = 30 * 60 * 1000;
 
-const HELP = `qq-setup: set up quirq infra (qq) for your GitHub org, or install qq to work on a repo that uses it.
+const HELP = `qq-setup: install, update or remove qq and xo on this machine, install qq to work on a repo that uses it, or set up quirq infra (qq) for your GitHub org.
 
   npx --allow-remote=root https://codeload.github.com/quirq-ai/setup/tar.gz/<commit> [--no-browser] [--port N]
 
 <commit> is the full id of the latest commit on https://github.com/quirq-ai/setup/commits/main.
 npm 12 runs a package from a tarball link only with --allow-remote=root.
 
-Checks your tools and gh login, then opens a form on 127.0.0.1 with two choices:
-  - set up repos in an org you own: pick the org and repos, and the plan prints here;
-  - work on a repo that already uses qq: the commands that install qq print here.
-The form only reads: it changes nothing on GitHub and installs nothing.
+Checks your tools and gh login, then opens a form on 127.0.0.1 with three choices:
+  - this machine: install, update or remove qq and xo. The form shows what is installed and the
+    exact commands for what you pick, and runs them when you press Run;
+  - work on a repo that already uses qq: the commands that get it print here;
+  - set up repos in an org you own: pick the org and repos, and the plan prints here.
+The form changes nothing on GitHub. Without a gh login it still opens, for this machine only.
 
-  install        install, update or remove qq and xo on this machine instead: it shows what is
+  install        install, update or remove qq and xo in this terminal instead: it shows what is
                  installed, asks, prints the commands and runs them after a yes (install --help)
   --no-browser   print the form's link instead of opening it
   --port N       serve the form on 127.0.0.1:N (default: a free port). Over SSH, forward the
@@ -69,28 +72,40 @@ async function main(argv = process.argv.slice(2)) {
   if (argv.includes("--help") || argv.includes("-h")) return console.log(HELP), 0;
   if (argv.includes("--version")) return console.log(`qq-setup ${pkg.version}`), 0;
 
-  console.log(`${bold("qq-setup")} ${pkg.version}: sets up quirq infra (qq) for a GitHub org, or shows how to install qq.`);
-  console.log("This version only reads from GitHub. Nothing is created or changed.\n");
+  console.log(`${bold("qq-setup")} ${pkg.version}: sets up quirq infra (qq) for a GitHub org, or installs qq and xo on this machine.`);
+  console.log("It only reads from GitHub: nothing there is created or changed.\n");
 
   const results = await preflight();
+  // Without these the form cannot open at all; the other failures only rule out the GitHub parts.
+  const hard = (/** @type {{ name: string }} */ c) => c.name === "Node" || c.name === "No token variables";
   for (const c of results) console.log(`  ${c.ok ? "ok  " : c.fatal ? "FAIL" : "note"}  ${c.name}: ${c.detail}`);
-  if (results.some((c) => !c.ok && c.fatal)) {
+  if (results.some((c) => !c.ok && c.fatal && hard(c))) {
     console.error("\nqq-setup: fix the FAIL lines above, then run it again.");
     return 1;
   }
+  const blocked = results.filter((c) => !c.ok && c.fatal);
+  /** Why the GitHub parts are off, or null when they work. */
+  const github = blocked.length ? blocked.map((c) => `${c.name}: ${c.detail}`).join("; ") : null;
 
-  const login = results.find((c) => c.name === "gh login")?.detail.replace(/^logged in as /, "") ?? "";
-  console.log("\nReading your GitHub orgs...");
-  const orgs = await listOrgs();
-  if (!orgs.some((o) => o.usable)) {
-    console.log(`  note  ${login} owns no GitHub org, so the form can only show how to install qq. To set up repos,`);
+  const login = github ? "" : results.find((c) => c.name === "gh login")?.detail.replace(/^logged in as /, "") ?? "";
+  /** @type {import("./facts.mjs").Org[]} */
+  let orgs = [];
+  if (github) {
+    console.log("\nThe form opens for this machine only (install, update or remove qq and xo). To set up repos,");
+    console.log("fix the FAIL lines above and run it again.");
+  } else {
+    console.log("\nReading your GitHub orgs...");
+    orgs = await listOrgs();
+  }
+  if (!github && !orgs.some((o) => o.usable)) {
+    console.log(`  note  ${login} owns no GitHub org, so the form can only install qq and xo here. To set up repos,`);
     console.log("        create a free org at https://github.com/account/organizations/new, move your repos into it");
     console.log("        (each repo's Settings > General > Transfer ownership), then run this again.");
   }
 
   /** @type {Map<string, import("./facts.mjs").Repo[]>} */
   const listed = new Map();
-  /** @type {(v: import("./plan.mjs").Answers | { tools: string | null }) => void} */
+  /** @type {(v: import("./plan.mjs").Answers | { tools: string | null } | { done: true }) => void} */
   let gotAnswers = () => {};
   const answered = new Promise((ok) => (gotAnswers = ok));
   let accepted = false;
@@ -109,6 +124,11 @@ async function main(argv = process.argv.slice(2)) {
   // Set once a page has traded the key, so a slow auto-open never launches a browser on a dead link.
   let traded = false;
   let refused = 0;
+  const home = process.env.HOME ?? "";
+  // The machine steps act on ~: with no absolute HOME the panel offers nothing (cli/install.mjs refuses too).
+  const here = home.startsWith("/") ? machine({ home, env: process.env, platform: process.platform,
+    echo: (t) => process.stdout.write(t) }) : null;
+  const noHome = { error: "HOME must be set to an absolute path for qq-setup to install anything" };
   const form = await startServer({
     root: join(ROOT, "out"),
     port,
@@ -126,7 +146,7 @@ async function main(argv = process.argv.slice(2)) {
       else if (Number.isInteger(Math.log10(refused))) console.log(`The link has now been tried again ${refused} times; all refused.`);
     },
     handlers: {
-      state: async () => (touch(), { version: pkg.version, readOnly: true, login, orgs, platform: process.platform,
+      state: async () => (touch(), { version: pkg.version, readOnly: true, login, orgs, github, platform: process.platform,
         tools: { install: installFor(process.platform), ...commandsFor(process.platform), needs: NEEDS, mac: MAC, access: ACCESS } }),
       repos: async (org) => {
         touch();
@@ -139,7 +159,14 @@ async function main(argv = process.argv.slice(2)) {
       },
       submit: async (body) => {
         touch();
+        if (here?.busy()) return { ok: false, status: 409, error: "the machine steps are still running: wait for them to finish" };
         if (accepted) return { ok: false, status: 409, error: "already answered: the terminal has your first answers" };
+        // The "This machine" panel's Done button: nothing more to print.
+        if (body && typeof body === "object" && "mode" in body && body.mode === "done" && Object.keys(body).length === 1) {
+          accepted = true;
+          gotAnswers({ done: true });
+          return { ok: true };
+        }
         if (body && typeof body === "object" && "mode" in body) {
           const t = checkTools(body);
           if (!t.ok) return t;
@@ -148,6 +175,7 @@ async function main(argv = process.argv.slice(2)) {
           return { ok: true };
         }
         const checked = checkAnswers(body, orgs, (o) => listed.get(o));
+        if (github) return { ok: false, status: 409, error: `setting up repos needs GitHub: ${github}` };
         if (!checked.ok) return checked;
         // The form only knows the 100 most recently pushed repos: ask GitHub about the new name itself.
         const st = checked.answers.starter;
@@ -158,6 +186,19 @@ async function main(argv = process.argv.slice(2)) {
         accepted = true;
         gotAnswers(checked.answers);
         return { ok: true };
+      },
+      machine: {
+        state: async () => (touch(), here ? here.state() : noHome),
+        plan: async (body) => (touch(), here ? here.plan(body) : { ok: false, status: 409, ...noHome }),
+        start: async (body) => {
+          touch();
+          if (!here) return { ok: false, status: 409, ...noHome };
+          if (accepted) return { ok: false, status: 409, error: "the terminal already has your answers, and the form is closing" };
+          const r = await here.start(body);
+          if (r.ok) console.log("\nRunning the steps picked in the form:");
+          return r;
+        },
+        progress: (from) => (touch(), here ? here.progress(from) : noHome),
       },
     },
   });
@@ -207,6 +248,10 @@ async function main(argv = process.argv.slice(2)) {
     return 1;
   }
 
+  if ("done" in answers) {
+    console.log("\nThe form is closed. Open a new terminal so PATH changes take effect.");
+    return 0;
+  }
   if ("tools" in answers) {
     console.log("");
     for (const line of toolsText(answers.tools, process.platform)) console.log(line);

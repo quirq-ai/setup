@@ -1,7 +1,7 @@
 // @ts-check
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -10,7 +10,7 @@ import {
   BREW_PYTHON, cleanTmp, DEMO, defaultAction, describe, detect, localWork, main, persistPython, pickPython, pinIn, planSteps, pythonOk,
   QQ_REMOVE, QQ_REMOVE_TOOLS, read, removeLineCmd, SYNC_PIN, XO, XO_PATH_LINE, XO_PIN, XO_SPEC,
 } from "../cli/install.mjs";
-import { INSTALL, MAC_PYTHON } from "../cli/tools.mjs";
+import { INSTALL } from "../cli/tools.mjs";
 
 /** The commands of a fixture, and the commit its header names. @param {string} name */
 function fixture(name) {
@@ -111,7 +111,11 @@ test("planSteps: install, update and remove, in order", () => {
 
 test("planSteps: Python comes first when an install needs it", () => {
   const old = { cmd: null, version: "Python 3.9.6", ok: false, persist: false };
-  assert.equal(planSteps({ qq: "install", xo: "keep" }, none, { python: old, platform: "darwin", git: true }).steps[0], MAC_PYTHON);
+  // On a Mac: brew's Python, then the QQ_PYTHON line in the file the PATH step writes (not always ~/.zshrc,
+  // or a bash user's next terminal has qq on PATH but no QQ_PYTHON).
+  const mac = planSteps({ qq: "install", xo: "keep" }, none, { python: old, platform: "darwin", git: true }).steps;
+  assert.deepEqual(mac, [BREW_PYTHON, persistPython("python3.13"), ...INSTALL]);
+  assert.ok(!mac.some((x) => x.cmd.includes("~/.zshrc; }")), "not the guide's zsh-only line");
   // xo alone on a Mac: brew's Python, but no QQ_PYTHON line.
   assert.deepEqual(planSteps({ qq: "keep", xo: "install" }, none, { python: old, platform: "darwin", git: true }).steps,
     [BREW_PYTHON, XO.install, XO.path]);
@@ -180,7 +184,7 @@ test("detect reads what a previous install left", async () => {
   const old = "1".repeat(40);
   const s = await detect({ home, latest: "b".repeat(40), run: fakeRun({ xoPin: old }) });
   assert.deepEqual(s.qq, { installed: true, broken: false, commit: "a".repeat(40), latest: "b".repeat(40), syncPin: SYNC_PIN, onPath: true,
-    behind: ["qq aaaaaaa is behind bbbbbbb"], localWork: null });
+    behind: ["qq aaaaaaa is behind bbbbbbb"], localWork: null, pythonLine: null });
   // An xo commit other than the pin may be newer: a note, not "behind". Missing only its PATH line,
   // it gets just that line, never a reinstall at the pin.
   assert.deepEqual(s.xo.behind, ["not on PATH"]);
@@ -288,8 +292,13 @@ test("main: --remove --yes keeps local work and the guide's demo folders; asking
   assert.ok(yes.out.includes("  kept ~/qq-try") && yes.out.includes("  kept ~/qq-ci-venv"));
   assert.ok(yes.out.includes("~/.zshrc still sets QQ_PYTHON; delete that line unless something else uses that Python."));
   // Asked: Enter keeps each demo folder; "y" deletes only that one.
-  const asked = await drive(["--only", "qq"], { home, answers: ["r", "y", "", "y"] });
+  // Then Enter keeps the QQ_PYTHON line too.
+  const asked = await drive(["--only", "qq"], { home, answers: ["r", "y", "", "", "y"] });
+  assert.match(asked.asked[3], /Also delete the export QQ_PYTHON=python3\.13 line from ~\/\.zshrc .*\[y\/N\]/);
   assert.deepEqual(asked.steps, [QQ_REMOVE_TOOLS, "rm -rf ~/qq-try", cleanTmp(QQ_REMOVE[1])]);
+  // "y" deletes exactly that line, with the guide's own line-removing command.
+  const py = await drive(["--only", "qq"], { home, answers: ["r", "", "", "y", "y"] });
+  assert.deepEqual(py.steps, [QQ_REMOVE_TOOLS, cleanTmp(QQ_REMOVE[1]), cleanTmp(removeLineCmd("export QQ_PYTHON=python3.13", "QQ_PYTHON"))]);
   // Local work: --remove and --update keep qq, and say why.
   const work = await drive(["--remove", "--yes", "--only", "qq"], { home, tty: false, run: fakeRun({ ahead: "2" }) });
   assert.deepEqual(work.steps, []);
@@ -297,6 +306,17 @@ test("main: --remove --yes keeps local work and the guide's demo folders; asking
   // Plain --yes with qq behind and local work: kept too.
   const plain = await drive(["--yes", "--only", "qq"], { home, tty: false, run: fakeRun({ head: "c".repeat(40), stash: "stash@{0}: x\n" }) });
   assert.deepEqual(plain.steps, []);
+});
+
+test("main: while removing qq, Enter at 'Install xo?' installs nothing", async () => {
+  const home = fakeHome();
+  rmSync(join(home, ".xo"), { recursive: true });
+  const r = await drive([], { home, answers: ["r", "", "y"] });
+  assert.match(r.asked[1], /Install xo\? \[y\/N\]/);
+  assert.deepEqual(r.steps, [QQ_REMOVE_TOOLS, cleanTmp(QQ_REMOVE[1])]);
+  // Without a remove, a missing tool is still offered with Enter as yes.
+  const fresh = await drive([], { home, answers: ["", ""] , run: fakeRun({ head: "c".repeat(40) }) });
+  assert.match(fresh.asked[1], /Install xo\? \[Y\/n\]/);
 });
 
 test("main: a broken xo is offered a reinstall, and --remove removes it", async () => {
@@ -354,7 +374,7 @@ test("main: on a Mac with no new enough Python, brew's python3.13 is what the st
   const r = await drive(["--yes", "--only", "qq"], { home, platform: "darwin", tty: false,
     run: async (/** @type {string} */ f) => (f === "python3" ? "Python 3.9.6" : f === "git" ? "git version 2.50" : null) });
   assert.equal(r.code, 0);
-  assert.equal(r.steps[0], MAC_PYTHON.cmd);
+  assert.deepEqual(r.steps.slice(0, 2), [BREW_PYTHON.cmd, persistPython("python3.13").cmd]);
   assert.ok(r.envs.every((e) => e.QQ_PYTHON === "python3.13"));
 });
 

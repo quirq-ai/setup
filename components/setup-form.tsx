@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, CircleCheck, Copy, TriangleAlert } from "lucide-react";
+import { CircleCheck, TriangleAlert } from "lucide-react";
+import { Command } from "@/components/command";
+import { MachinePanel } from "@/components/machine-panel";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,7 +27,7 @@ import {
 } from "@/lib/api";
 import { isBlankRepo, isName, parseRepo } from "@/cli/names.mjs";
 
-type Mode = "repos" | "tools";
+type Mode = "machine" | "repos" | "tools";
 
 // "pending" while prerendering and until the server answers; "none" when this tab holds neither
 // the link's unused key nor the session it was traded for.
@@ -68,7 +70,7 @@ export function SetupForm() {
   const [starterKind, setStarterKind] = useState<StarterKind>("node-app");
   const [sending, setSending] = useState(false);
   const [done, setDone] = useState<Mode | null>(null);
-  const [mode, setMode] = useState<Mode>("repos");
+  const [mode, setMode] = useState<Mode>("machine");
   const [workRepo, setWorkRepo] = useState("");
   const latestOrg = useRef("");
 
@@ -107,7 +109,6 @@ export function SetupForm() {
           setState(s);
           setSession("ready");
           const usable = s.orgs.filter((o) => o.usable);
-          if (usable.length === 0) setMode("tools");
           if (usable.length === 1) chooseOrg(usable[0].login);
         },
         (e: Error) => {
@@ -145,9 +146,11 @@ export function SetupForm() {
             Back to your terminal
           </CardTitle>
           <CardDescription>
-            {done === "tools"
-              ? "qq-setup printed the commands there. You can close this tab."
-              : "qq-setup has your answers and shows the plan there. You can close this tab."}
+            {done === "machine"
+              ? "qq-setup has stopped. You can close this tab."
+              : done === "tools"
+                ? "qq-setup printed the commands there. You can close this tab."
+                : "qq-setup has your answers and shows the plan there. You can close this tab."}
           </CardDescription>
         </CardHeader>
       </Card>
@@ -214,12 +217,12 @@ export function SetupForm() {
       <div className="flex flex-col gap-2">
         <h1 className="font-display text-2xl">Set up qq</h1>
         <p className="text-muted-foreground">
-          Put your org&apos;s repos under qq, or install qq on this machine to work on a repo that already uses
-          it. Your answer goes back to the terminal.
+          Install, update or remove qq and xo on this machine, get a repo that already uses qq, or put your
+          org&apos;s repos under qq.
         </p>
         {state?.readOnly && (
           <p className="text-sm text-muted-foreground">
-            This version only shows the plan or prints commands. It creates, changes and installs nothing.
+            It changes nothing on GitHub. On this machine it runs only the steps you pick, after you press Run.
           </p>
         )}
       </div>
@@ -234,7 +237,7 @@ export function SetupForm() {
 
       {!state && !error && (
         <p className="flex items-center gap-2 text-muted-foreground">
-          <Spinner /> Reading your orgs…
+          <Spinner /> Loading…
         </p>
       )}
 
@@ -247,6 +250,24 @@ export function SetupForm() {
           </CardHeader>
           <CardContent>
             <RadioGroup value={mode} onValueChange={(v) => setMode(v as Mode)} aria-label="What do you want to do?">
+              <div className="flex items-start gap-3">
+                <RadioGroupItem value="machine" id="mode-machine" className="mt-0.5" aria-describedby="mode-machine-what" />
+                <div className="flex flex-col gap-0.5">
+                  <Label htmlFor="mode-machine">Install, update or remove qq and xo on this machine</Label>
+                  <span id="mode-machine-what" className="text-sm text-muted-foreground">
+                    See what is installed, pick what to do, and run it from this page.
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <RadioGroupItem value="tools" id="mode-tools" className="mt-0.5" aria-describedby="mode-tools-what" />
+                <div className="flex flex-col gap-0.5">
+                  <Label htmlFor="mode-tools">Install qq on my machine and work on a repo</Label>
+                  <span id="mode-tools-what" className="text-sm text-muted-foreground">
+                    For a repo that already uses qq. The terminal prints the commands.
+                  </span>
+                </div>
+              </div>
               <div className="flex items-start gap-3">
                 <RadioGroupItem
                   value="repos"
@@ -261,18 +282,11 @@ export function SetupForm() {
                     Set up repos in an org I own
                   </Label>
                   <span id="mode-repos-what" className="text-sm text-muted-foreground">
-                    {ownsAnOrg
-                      ? "Pick the org and repos. The terminal shows the plan."
-                      : "You own no GitHub org yet: create a free one at github.com/account/organizations/new, then run qq-setup again."}
-                  </span>
-                </div>
-              </div>
-              <div className="flex items-start gap-3">
-                <RadioGroupItem value="tools" id="mode-tools" className="mt-0.5" aria-describedby="mode-tools-what" />
-                <div className="flex flex-col gap-0.5">
-                  <Label htmlFor="mode-tools">Install qq on my machine and work on a repo</Label>
-                  <span id="mode-tools-what" className="text-sm text-muted-foreground">
-                    For a repo that already uses qq. The terminal prints the commands.
+                    {state.github
+                      ? `Needs GitHub, which is not ready: ${state.github}. Fix it, then run qq-setup again.`
+                      : ownsAnOrg
+                        ? "Pick the org and repos. The terminal shows the plan."
+                        : "You own no GitHub org yet: create a free one at github.com/account/organizations/new, then run qq-setup again."}
                   </span>
                 </div>
               </div>
@@ -280,6 +294,8 @@ export function SetupForm() {
           </CardContent>
         </Card>
       )}
+
+      {state && mode === "machine" && <MachinePanel onDone={() => setDone("machine")} />}
 
       {state && mode === "tools" && (
         <ToolsSteps
@@ -475,44 +491,6 @@ export function SetupForm() {
               : "Nothing changes on GitHub until you type yes in the terminal."}
           </p>
         </div>
-      )}
-    </div>
-  );
-}
-
-function Command({ children, label }: { children: string; label: string }) {
-  const [copied, setCopied] = useState<"yes" | "failed" | null>(null);
-  return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-start gap-2">
-        {/* One line that scrolls inside the block: wrapping would split words at hyphens (~/qq-|tools). */}
-        <pre
-          tabIndex={0}
-          className="min-w-0 flex-1 overflow-x-auto rounded-md border border-border bg-muted px-3 py-2 font-mono text-sm whitespace-pre focus-visible:outline-hidden focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-        >
-          {children}
-        </pre>
-        <Button
-          variant="outline"
-          size="icon"
-          aria-label={copied === "yes" ? `Copied: ${label}` : `Copy: ${label}`}
-          onClick={() => {
-            navigator.clipboard.writeText(children).then(
-              () => {
-                setCopied("yes");
-                setTimeout(() => setCopied(null), 2000);
-              },
-              () => setCopied("failed"),
-            );
-          }}
-        >
-          {copied === "yes" ? <Check aria-hidden /> : <Copy aria-hidden />}
-        </Button>
-      </div>
-      {copied === "failed" && (
-        <p role="alert" className="text-sm text-destructive">
-          Could not copy. Select the command and copy it yourself.
-        </p>
       )}
     </div>
   );

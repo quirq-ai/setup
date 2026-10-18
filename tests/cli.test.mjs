@@ -209,6 +209,10 @@ test("server: single-use key, session cookie, host, origin, body size and static
   await writeFile(join(root, "secret.txt"), "outside");
   /** @type {unknown[]} */
   const submitted = [];
+  /** @type {unknown[]} */
+  const planned = [];
+  /** @type {unknown[]} */
+  const started = [];
   let sessions = 0;
   let refused = 0;
   const srv = await startServer({
@@ -220,6 +224,12 @@ test("server: single-use key, session cookie, host, origin, body size and static
       repos: async (org) => ({ org }),
       submit: async (b) =>
         submitted.length ? { ok: false, status: 409, error: "already answered" } : (submitted.push(b), { ok: true }),
+      machine: {
+        state: async () => ({ qq: "here" }),
+        plan: async (b) => (planned.push(b), { ok: true, id: "p1" }),
+        start: async (b) => (started.push(b), { ok: false, status: 409, error: "that is not the latest plan" }),
+        progress: (from) => ({ from }),
+      },
     },
   });
   try {
@@ -285,6 +295,21 @@ test("server: single-use key, session cookie, host, origin, body size and static
     assert.equal(again.status, 409);
     assert.deepEqual(JSON.parse(again.body), { ok: false, error: "already answered" });
     assert.deepEqual(submitted, [{ org: "acme" }]);
+
+    // The machine endpoints need the session like the rest, and their POSTs need our origin and JSON.
+    assert.equal((await hit(p, { path: "/api/machine", headers: { ...x, cookie: k.cookie } })).status, 401);
+    assert.equal((await hit(p, { path: "/api/machine", headers: k })).body, JSON.stringify({ qq: "here" }));
+    assert.equal((await hit(p, { path: "/api/machine/run?from=7", headers: k })).body, JSON.stringify({ from: 7 }));
+    const mpost = (/** @type {string} */ path, /** @type {string} */ body, /** @type {Record<string, string>} */ h = k) =>
+      hit(p, { method: "POST", path, headers: { ...h, "content-type": "application/json" }, body });
+    assert.equal((await mpost("/api/machine/plan", "{}", noOrigin)).status, 403);
+    assert.equal((await mpost("/api/machine/run", "{}", noOrigin)).status, 403);
+    assert.equal((await mpost("/api/machine/run", "{}", { ...k, origin: "http://127.0.0.1:1" })).status, 403);
+    assert.equal((await mpost("/api/machine/plan", "{}", { "x-qq-setup": token, origin })).status, 401);
+    assert.equal((await mpost("/api/machine/plan", JSON.stringify({ qq: "keep" }))).status, 200);
+    assert.equal((await mpost("/api/machine/run", JSON.stringify({ id: "p1" }))).status, 409);
+    assert.deepEqual(planned, [{ qq: "keep" }]);
+    assert.deepEqual(started, [{ id: "p1" }]);
   } finally {
     srv.close();
   }

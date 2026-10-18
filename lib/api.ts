@@ -28,11 +28,41 @@ export type Tools = {
   mac: string;
   access: string;
 };
-export type State = { version: string; readOnly: boolean; login: string; orgs: Org[]; platform: string; tools: Tools };
+export type State = {
+  version: string;
+  readOnly: boolean;
+  login: string;
+  orgs: Org[];
+  // Why the GitHub parts are off (no gh, no login, missing scopes), or null when they work.
+  github: string | null;
+  platform: string;
+  tools: Tools;
+};
+
+// The "This machine" panel (cli/machine.mjs). The page sends only a choice per tool and a plan's id.
+export type Action = "install" | "update" | "remove" | "keep" | "path";
+export type MachineTool = { line: string; choices: Action[]; installed: boolean; broken: boolean };
+export type Machine = {
+  platform: string;
+  pin: string;
+  running: boolean;
+  demo: string[];
+  qq: MachineTool & { localWork: string | null; pythonLine: { line: string; files: string[] } | null };
+  xo: MachineTool & { foreign: boolean; note: string | null };
+};
+export type Choice = { qq: Action; xo: Action; demo: string[]; python: boolean };
+export type Step = { what: string; cmd: string };
+export type Plan = { ok: true; id: string | null; steps: Step[]; stop: string | null; notes: string[] };
+export type StepStatus = { what: string; status: "pending" | "running" | "ok" | "failed"; code?: number };
+export type Progress = {
+  running: boolean;
+  run: null | { id: string; steps: StepStatus[]; log: string; next: number; done: boolean; code: number | null; notes: string[] };
+};
 export type RepoList = { org: string; truncated: boolean; repos: Repo[] };
 export type StarterKind = "node-app" | "python-service";
 export type Answers = { org: string; repos: string[]; starter: null | { name: string; kind: StarterKind } };
 export type ToolsAnswer = { mode: "tools"; repo: string | null };
+export type DoneAnswer = { mode: "done" };
 
 export const KIND_LABELS: Record<Kind, string> = {
   "python-service": "Python service",
@@ -110,7 +140,21 @@ export const api = {
   },
   state: () => call<State>("/api/state"),
   repos: (org: string) => call<RepoList>(`/api/repos?org=${encodeURIComponent(org)}`),
-  submit: (answers: Answers | ToolsAnswer) =>
+  machine: () => call<Machine>("/api/machine"),
+  plan: (choice: Choice) =>
+    call<Plan>("/api/machine/plan", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(choice),
+    }),
+  run: (id: string) =>
+    call<{ ok: true; id: string }>("/api/machine/run", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id }),
+    }),
+  progress: (from: number) => call<Progress>(`/api/machine/run?from=${from}`),
+  submit: (answers: Answers | ToolsAnswer | DoneAnswer) =>
     call<{ ok: true }>("/api/answers", {
       method: "POST",
       headers: { "content-type": "application/json" },

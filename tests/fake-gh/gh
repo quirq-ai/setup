@@ -49,6 +49,11 @@ const routes = {
 };
 // FAKE_GH_NO_ORGS: a login that owns no org (it is only a member of big-co).
 if (process.env.FAKE_GH_NO_ORGS) routes["user/memberships/orgs?state=active&per_page=100&page=1"].splice(0, 1);
+// FAKE_GH_NO_LOGIN: gh is installed but not logged in.
+if (process.env.FAKE_GH_NO_LOGIN) {
+  console.error("To get started with GitHub CLI, please run:  gh auth login");
+  process.exit(4);
+}
 if (args.includes("--include") && path === "user") {
   process.stdout.write("HTTP/2.0 200 OK\r\nX-Oauth-Scopes: gist, read:org, repo, workflow\r\n\r\n" + JSON.stringify(routes.user));
   process.exit(0);

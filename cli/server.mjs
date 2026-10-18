@@ -46,7 +46,14 @@ const MAX_BODY = 16 * 1024;
  *   state: () => Promise<unknown>,
  *   repos: (org: string) => Promise<unknown>,
  *   submit: (body: unknown) => Promise<{ ok: true } | { ok: false, error: string, status?: number }>,
+ *   machine: {
+ *     state: () => Promise<unknown>,
+ *     plan: (body: unknown) => Promise<Result>,
+ *     start: (body: unknown) => Promise<Result>,
+ *     progress: (from: number) => unknown,
+ *   },
  * }} Handlers
+ * @typedef {({ ok: true } & Record<string, unknown>) | { ok: false, error: string, status?: number }} Result
  */
 
 /**
@@ -106,7 +113,14 @@ export async function startServer({ root, handlers, port = 0, onSession = () => 
         if (req.method === "GET" && url.pathname === "/api/repos") {
           return send(res, 200, await handlers.repos(url.searchParams.get("org") ?? ""));
         }
-        if (req.method === "POST" && url.pathname === "/api/answers") {
+        // The "This machine" panel (cli/machine.mjs): the page sends choices and a plan's id, never a command.
+        if (req.method === "GET" && url.pathname === "/api/machine") return send(res, 200, await handlers.machine.state());
+        if (req.method === "GET" && url.pathname === "/api/machine/run") {
+          return send(res, 200, handlers.machine.progress(Number(url.searchParams.get("from") ?? 0)));
+        }
+        /** @type {Record<string, (body: unknown) => Promise<Result>>} */
+        const posts = { "/api/answers": handlers.submit, "/api/machine/plan": handlers.machine.plan, "/api/machine/run": handlers.machine.start };
+        if (req.method === "POST" && Object.hasOwn(posts, url.pathname)) {
           if (!String(req.headers["content-type"] ?? "").startsWith("application/json")) {
             return send(res, 415, { error: "expected application/json" });
           }
@@ -117,7 +131,7 @@ export async function startServer({ root, handlers, port = 0, onSession = () => 
           } catch {
             return send(res, 400, { error: "not JSON" });
           }
-          const result = await handlers.submit(parsed);
+          const result = await posts[url.pathname](parsed);
           if (result.ok) return send(res, 200, result);
           return send(res, result.status ?? 400, { ok: false, error: result.error });
         }
