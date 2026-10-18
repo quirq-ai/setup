@@ -288,6 +288,8 @@ for (const width of [320, 390, 1280]) {
       await expect(page.getByText("qq is not on this machine yet: install it in step 1 first.")).toBeVisible();
       // The steps bar stays in view and takes the reader to each step.
       const steps = page.getByRole("navigation", { name: "Steps" });
+      // Step 2's repos first: before they load the page is too short to scroll a heading under the bar.
+      await expect(page.getByText("billing-api", { exact: true })).toBeAttached();
       await steps.getByRole("button", { name: "2. Your org's repos" }).click();
       const step2 = page.getByRole("heading", { name: "2. Set up repos in an org you own" });
       await expect(step2).toBeInViewport();
