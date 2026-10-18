@@ -107,9 +107,10 @@ export function MachinePanel({ onDone }: { onDone: () => void }) {
       }
       await load();
     } catch (e) {
-      setRunError((e as Error).message);
-      // A refused run (the machine changed) needs a fresh look and a fresh plan.
+      // A refused run (the machine changed) needs a fresh look and a fresh plan. The look resets the
+      // choices, which clears the last message, so say why afterwards.
       await load().catch(() => {});
+      setRunError((e as Error).message);
     } finally {
       setStarting(false);
     }
