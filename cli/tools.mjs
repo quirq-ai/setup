@@ -1,10 +1,8 @@
 // @ts-check
-// The second way in: put qq on this machine and work on a repo that already uses it. qq-setup only
-// prints these commands; it runs none of them. They are copied from the qq guide
+// qq's install commands, which `qq-setup install` and the page's "This machine" steps run (cli/install.mjs).
+// They are copied from the qq guide
 // (quirq-ai/docs content/docs/install.mdx, "Install qq", at d02c27f); change both together,
 // with tests/fixtures/qq-guide-install.txt. MAC_PYTHON is that page's "On a Mac, set up Python first" command.
-
-import { isBlankRepo, parseRepo } from "./names.mjs";
 
 /** Each runs inside `( … )`, so it leaves the shell as it was, and each is safe to run again. */
 export const INSTALL = [
@@ -39,94 +37,10 @@ export function qqPython(/** @type {Record<string, string | undefined>} */ env) 
   return env.QQ_PYTHON || "python3";
 }
 
-/** What a person runs inside a repo that has infra/repo.toml. */
-export const USE = [
-  { cmd: "qq sync", what: "fetch the pinned toolchains and check their digests" },
-  { cmd: "qq build [TARGET]", what: "install dependencies and build" },
-  { cmd: "qq test [TARGET]", what: "build and test; results in .qq/out/results.json" },
-  { cmd: 'qq run "COMMAND"', what: "run a command once, from the repo root, with the pinned toolchains first on PATH" },
-];
-
-/** On a Mac: no qq sync (it stops), and qq run uses PATH. */
-export const USE_MAC = [
-  { cmd: "qq build [TARGET]", what: "install dependencies and build, with the tools you installed" },
-  { cmd: "qq test [TARGET]", what: "build and test; results in .qq/out/results.json" },
-  { cmd: 'qq run "COMMAND"', what: "run a command once, from the repo root, with the tools on your PATH" },
-];
-
-/** qq build and qq test hand off to a recipe for the repo's qq kind; not every kind has one yet. */
-export const USE_NOTE =
-  "qq build and qq test work where qq has a local recipe for the repo's kind; the repo's infra/repo.toml says when it has none.";
-
-export const NEEDS =
-  "git and Python 3.11.4 or newer with its venv module (Debian/Ubuntu: python3-venv). qq uses python3 unless QQ_PYTHON names another Python.";
-
-/** One statement about macOS, shared with preflight, the page and the README (a test keeps them equal). */
+/** One statement about macOS, shared with preflight and the README (a test keeps them equal). */
 export const MAC =
   "qq fetches toolchains for Linux x86_64 only, so on a Mac qq fetch clones the repo and then stops with " +
   "\"no pin for platform\", and qq sync stops the same way: clone with git and install the repo's pinned tools " +
   "yourself (qqsync show infra/repo.toml lists them). qq build and qq test then use them, from " +
   "--toolchain NAME=ROOT or your PATH, and still check the pinned versions (exact Python, Node major); " +
   "qq run uses your PATH.";
-
-/**
- * What to list inside the repo on this platform. The page and the terminal both use this, so they
- * always say the same thing.
- * @param {string} platform  process.platform
- */
-export function commandsFor(platform) {
-  return { use: platform === "darwin" ? USE_MAC : USE, useNote: USE_NOTE };
-}
-
-export const ACCESS =
-  "To push branches to a repo and open pull requests from them, an owner gives you Write access: the repo's " +
-  "Settings > Collaborators & teams, or an org team with Write on it. Without that, fork it on GitHub and work on your fork.";
-
-/**
- * The line that gets the repo: qq fetch, except on a Mac, where it stops after cloning.
- * @param {string | null} repo  "owner/name", already checked
- * @param {string} platform  process.platform
- */
-export function getLine(repo, platform) {
-  const url = `https://github.com/${repo ?? "OWNER/NAME"}`;
-  return platform === "darwin" ? `git clone ${url}` : `qq fetch ${url}`;
-}
-
-/**
- * Accept the form's "just the tools" answer: `{ mode: "tools", repo: "owner/name" | null }`.
- * @param {unknown} body
- * @returns {{ ok: true, repo: string | null } | { ok: false, error: string }}
- */
-export function checkTools(body) {
-  if (!body || typeof body !== "object") return { ok: false, error: "expected a JSON object" };
-  const b = /** @type {Record<string, unknown>} */ (body);
-  const extra = Object.keys(b).filter((k) => !["mode", "repo"].includes(k));
-  if (extra.length) return { ok: false, error: `unexpected field: ${extra[0]}` };
-  if (b.mode !== "tools") return { ok: false, error: "mode must be tools" };
-  if (b.repo === null || b.repo === undefined) return { ok: true, repo: null };
-  if (typeof b.repo !== "string") return { ok: false, error: "repo must be owner/name" };
-  if (isBlankRepo(b.repo)) return { ok: true, repo: null };
-  const repo = parseRepo(b.repo);
-  if (!repo) return { ok: false, error: "repo must be owner/name, like quirq-ai/innernet" };
-  return { ok: true, repo };
-}
-
-/** The terminal's text for the tools path. @param {string | null} repo @param {string} platform @returns {string[]} */
-export function toolsText(repo, platform) {
-  const { use, useNote } = commandsFor(platform);
-  return [
-    "Install qq on this machine. Run each command once:",
-    ...installFor(platform).flatMap((s, i) => [`  ${i + 1}. ${s.what}:`, `     ${s.cmd}`]),
-    `Needs ${NEEDS}`,
-    "",
-    `Then get ${repo ?? "a repo that has infra/repo.toml"}:`,
-    `     ${getLine(repo, platform)}`,
-    ...(platform === "darwin" ? [MAC] : []),
-    "",
-    "Inside it:",
-    ...use.map((u) => `     ${u.cmd.padEnd(20)} ${u.what}`),
-    useNote,
-    "",
-    ACCESS,
-  ];
-}

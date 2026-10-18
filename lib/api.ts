@@ -20,14 +20,6 @@ export type Repo = {
   notes: string[];
 };
 
-export type Tools = {
-  install: { what: string; cmd: string }[];
-  use: { cmd: string; what: string }[];
-  useNote: string;
-  needs: string;
-  mac: string;
-  access: string;
-};
 export type State = {
   version: string;
   readOnly: boolean;
@@ -36,7 +28,6 @@ export type State = {
   // Why the GitHub parts are off (no gh, no login, missing scopes), or null when they work.
   github: string | null;
   platform: string;
-  tools: Tools;
 };
 
 // The "This machine" panel (cli/machine.mjs). The page sends only a choice per tool and a plan's id.
@@ -63,7 +54,6 @@ export type Progress = {
 export type RepoList = { org: string; truncated: boolean; repos: Repo[] };
 export type StarterKind = "node-app" | "python-service";
 export type Answers = { org: string; repos: string[]; starter: null | { name: string; kind: StarterKind } };
-export type ToolsAnswer = { mode: "tools"; repo: string | null };
 export type DoneAnswer = { mode: "done" };
 
 export const KIND_LABELS: Record<Kind, string> = {
@@ -161,7 +151,7 @@ export const api = {
       body: JSON.stringify({ id }),
     }),
   progress: (from: number) => call<Progress>(`/api/machine/run?from=${from}`),
-  submit: (answers: Answers | ToolsAnswer | DoneAnswer) =>
+  submit: (answers: Answers | DoneAnswer) =>
     call<{ ok: true }>("/api/answers", {
       method: "POST",
       headers: { "content-type": "application/json" },

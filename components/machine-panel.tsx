@@ -26,7 +26,13 @@ function label(a: Action, t: MachineTool): string {
 }
 
 /** The page's half of cli/machine.mjs: pick per tool, see the exact steps, press Run, watch them. */
-export function MachinePanel({ onDone }: { onDone: () => void }) {
+export function MachinePanel({ onDone, onLook, held }: {
+  onDone: () => void;
+  // Each fresh look, so the page can lead with installing qq when it is missing.
+  onLook: (m: Machine) => void;
+  // The org answers are on their way to the terminal: no run may start (it would be cut off).
+  held: boolean;
+}) {
   const [m, setM] = useState<Machine | null>(null);
   const [choice, setChoice] = useState<Choice | null>(null);
   // The plan, with the choice it was made for: a plan for an older choice is never shown or run.
@@ -71,10 +77,11 @@ export function MachinePanel({ onDone }: { onDone: () => void }) {
   const show = useCallback(
     (s: Machine) => {
       setM(s);
+      onLook(s);
       seen.current = s.seen;
       choose({ qq: "keep", xo: "keep", demo: [], python: false });
     },
-    [choose],
+    [choose, onLook],
   );
   const load = useCallback(() => api.machine().then(show), [show]);
   useEffect(() => {
@@ -155,7 +162,7 @@ export function MachinePanel({ onDone }: { onDone: () => void }) {
       <Card>
         <CardHeader>
           <CardTitle>
-            <h2 className="font-display text-lg">1. What to do on this machine</h2>
+            <h3 className="font-display text-lg">What to do</h3>
           </CardTitle>
           <CardDescription>
             Each tool starts at Keep. Nothing is installed or removed unless you pick it, and nothing runs until you press Run.
@@ -252,7 +259,7 @@ export function MachinePanel({ onDone }: { onDone: () => void }) {
       <Card>
         <CardHeader>
           <CardTitle>
-            <h2 className="font-display text-lg">2. The commands</h2>
+            <h3 className="font-display text-lg">The commands</h3>
           </CardTitle>
           <CardDescription>Exactly what Run runs, in order, in your home folder. Each is safe to run again.</CardDescription>
         </CardHeader>
@@ -289,7 +296,7 @@ export function MachinePanel({ onDone }: { onDone: () => void }) {
       <div className="flex flex-col gap-2">
         <Button
           size="lg"
-          disabled={running || !plan?.id || steps.length === 0}
+          disabled={running || held || !plan?.id || steps.length === 0}
           onClick={start}
           className="w-full sm:w-fit"
         >
@@ -309,9 +316,9 @@ export function MachinePanel({ onDone }: { onDone: () => void }) {
         <Card>
           <CardHeader>
             <CardTitle>
-              <h2 className="font-display text-lg">
+              <h3 className="font-display text-lg">
                 {!run.done ? "Running…" : run.code === 0 ? "Done" : "Stopped at a failed step"}
-              </h2>
+              </h3>
             </CardTitle>
             {run.done && (
               <CardDescription>

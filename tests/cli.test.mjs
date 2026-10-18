@@ -15,8 +15,7 @@ import { buildPlan, checkAnswers } from "../cli/plan.mjs";
 import { checks } from "../cli/preflight.mjs";
 import { listRepos } from "../cli/facts.mjs";
 import { classicFromError, protectionWarnings } from "../cli/protection.mjs";
-import { isBlankRepo, normalizeRepo, parseRepo } from "../cli/names.mjs";
-import { checkTools, commandsFor, getLine, INSTALL, installFor, MAC, MAC_PYTHON, toolsText } from "../cli/tools.mjs";
+import { installFor, MAC, MAC_PYTHON } from "../cli/tools.mjs";
 import { openerBase, writeOpener } from "../cli/opener.mjs";
 import { startServer } from "../cli/server.mjs";
 
@@ -366,32 +365,6 @@ test("listRepos: quirq-ai's own tool repos are named as part of qq, and an empty
   }
 });
 
-test("checkTools: only mode and an owner/name repo get through", () => {
-  assert.deepEqual(checkTools({ mode: "tools", repo: null }), { ok: true, repo: null });
-  assert.deepEqual(checkTools({ mode: "tools", repo: "" }), { ok: true, repo: null });
-  assert.deepEqual(checkTools({ mode: "tools", repo: "quirq-ai/innernet" }), { ok: true, repo: "quirq-ai/innernet" });
-  // A pasted link or a clone URL is accepted as the owner/name it names.
-  for (const pasted of ["https://github.com/quirq-ai/innernet", "https://github.com/quirq-ai/innernet/",
-    "https://github.com/quirq-ai/innernet.git", "quirq-ai/innernet.git", " quirq-ai/innernet "]) {
-    assert.deepEqual(checkTools({ mode: "tools", repo: pasted }), { ok: true, repo: "quirq-ai/innernet" }, pasted);
-  }
-  assert.equal(normalizeRepo("http://github.com/a/b"), "http://github.com/a/b"); // only https is unwrapped
-  const refused = ["innernet", "a/b/c", "../x", "a/-b", "a b/c", "a/b;rm", "$(id)/x", "a/b.git.git",
-    "a/b\r", "a\n/b", "a/b\r\nevil", "a/b\u001b[31m", "a/b\u0000", "a/b%0a",
-    "\tquirq-ai/innernet", "quirq-ai/innernet\t", "\u00a0quirq-ai/innernet", "\u3000quirq-ai/innernet",
-    "q‐ai/x", "а/b", "ｑ/b", "a/b​", "https://evil.example/a/b", "http://github.com/a/b", 7, true, ["a/b"]];
-  for (const repo of refused) assert.equal(checkTools({ mode: "tools", repo }).ok, false, JSON.stringify(repo));
-  // Blank is spaces only, the same rule the form uses (cli/names.mjs): a tab or NBSP alone is refused.
-  for (const blank of ["", " ", "   "]) assert.ok(isBlankRepo(blank) && checkTools({ mode: "tools", repo: blank }).ok);
-  for (const notBlank of ["\t", "\u00a0", "\u3000", "\n"]) {
-    assert.equal(isBlankRepo(notBlank), false);
-    assert.equal(parseRepo(notBlank), null);
-    assert.equal(checkTools({ mode: "tools", repo: notBlank }).ok, false, JSON.stringify(notBlank));
-  }
-  assert.equal(checkTools({ mode: "tools", repo: null, org: "acme" }).ok, false);
-  assert.equal(checkTools({ mode: "repos" }).ok, false);
-});
-
 test("the install commands are the qq guide's, byte for byte, at the docs commit tools.mjs names", async () => {
   const text = await readFile(new URL("./fixtures/qq-guide-install.txt", import.meta.url), "utf8");
   // Two header lines naming the docs file, commit and lines, then exactly the commands, a Mac's Python step first.
@@ -409,31 +382,6 @@ test("the install commands are the qq guide's, byte for byte, at the docs commit
 test("the README says the same about macOS as the page and the terminal", () => {
   const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8").replace(/\s+/g, " ");
   assert.ok(readme.includes(MAC), "README.md must contain the MAC text from cli/tools.mjs");
-});
-
-test("toolsText: install commands, then the line that gets the repo for this platform", () => {
-  const linux = toolsText("quirq-ai/innernet", "linux").join("\n");
-  for (const s of INSTALL) assert.ok(linux.includes(s.cmd));
-  assert.match(linux, /qq fetch https:\/\/github\.com\/quirq-ai\/innernet\n/);
-  assert.doesNotMatch(linux, /no pin for platform/);
-  const mac = toolsText("quirq-ai/innernet", "darwin").join("\n");
-  assert.match(mac, /git clone https:\/\/github\.com\/quirq-ai\/innernet\n/);
-  // On a Mac the Python step comes first; Linux does not get it.
-  assert.ok(mac.indexOf(MAC_PYTHON.cmd) > 0 && mac.indexOf(MAC_PYTHON.cmd) < mac.indexOf(INSTALL[0].cmd));
-  assert.ok(!linux.includes(MAC_PYTHON.cmd));
-  assert.doesNotMatch(mac, /qq fetch https/);
-  assert.match(mac, /qq fetch clones the repo and then stops with "no pin for platform"/);
-  assert.match(mac, /--toolchain NAME=ROOT or your PATH, and still check the pinned versions \(exact Python, Node major\); qq run uses your PATH/);
-  // On a Mac, qq sync stops, so it is not listed; build, test and run are, with the note.
-  assert.doesNotMatch(mac, /^ +qq sync/m);
-  assert.match(mac, /Inside it:\n +qq build/);
-  assert.match(mac, /^ +qq run "COMMAND" +.*your PATH$/m);
-  assert.match(linux, /Inside it:\n +qq sync/);
-  for (const p of ["darwin", "linux"]) assert.ok(commandsFor(p).useNote);
-  assert.ok(commandsFor("darwin").use.every((u) => !u.cmd.startsWith("qq sync")));
-  assert.equal(getLine(null, "linux"), "qq fetch https://github.com/OWNER/NAME");
-  // zsh-safe: no comment or history characters in anything a person pastes.
-  for (const s of installFor("darwin")) assert.doesNotMatch(s.cmd, /[#!]/);
 });
 
 /** Run the real CLI against the fake gh and return its link, output and exit. */
@@ -458,26 +406,25 @@ async function runCli({ browser = false, path = "", env: extra = {} } = {}) {
   return { proc, ...url, output: () => out, exited };
 }
 
-test("cli: a body with mode never reaches the repos check, and a tools answer is the only answer", async () => {
+test("cli: a body with mode never reaches the repos check, and the old tools answer is refused", async () => {
   const cli = await runCli();
   const { headers: k } = await openSession(cli.port, cli.key);
   const post = (/** @type {unknown} */ body) => hit(cli.port, { method: "POST", path: "/api/answers",
     headers: { ...k, "content-type": "application/json" }, body: JSON.stringify(body) });
   try {
     await hit(cli.port, { path: "/api/repos?org=acme-labs", headers: k });
-    // A complete, valid repos answer, but with a mode: refused by the tools check, never planned.
+    // A complete, valid repos answer, but with a mode: refused, never planned.
     const routed = await post({ mode: "repos", org: "acme-labs", repos: ["billing-api"], starter: null });
     assert.equal(routed.status, 400);
-    assert.match(routed.body, /unexpected field: org/);
-    assert.equal((await post({ mode: "tools", repo: "a/b\u001b[31m" })).status, 400);
-    assert.equal((await post({ mode: "tools", repo: "https://github.com/quirq-ai/innernet.git" })).status, 200);
-    const again = await post({ mode: "tools", repo: null });
-    assert.equal(again.status, 409);
+    assert.match(routed.body, /unexpected field: mode/);
+    // The page no longer has a "just print the install commands" answer.
+    const tools = await post({ mode: "tools", repo: "quirq-ai/innernet" });
+    assert.equal(tools.status, 400);
+    assert.match(tools.body, /unexpected field: mode/);
+    assert.equal((await post({ mode: "done" })).status, 200);
     assert.equal((await post({ org: "acme-labs", repos: ["billing-api"], starter: null })).status, 409);
     assert.equal(await cli.exited, 0);
-    // The CLI prints the line for the machine it runs on (CI runs this on macOS too).
-    assert.ok(cli.output().includes(`${getLine("quirq-ai/innernet", process.platform)}\n`));
-    assert.doesNotMatch(cli.output(), /Plan for/);
+    assert.doesNotMatch(cli.output(), /Plan for|Install qq on this machine\. Run each command once/);
   } finally {
     cli.proc.kill();
   }
