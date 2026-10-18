@@ -1,8 +1,8 @@
 # qq-setup
 
-One command to set up quirq infra (qq) for your GitHub org, or to put qq on your machine and work on
-a repo that already uses it: the terminal checks your tools, a short form in your browser asks
-which, and the terminal shows what it will do or prints the commands.
+One command to install, update or remove qq and xo on your machine, to put qq on your machine and
+work on a repo that already uses it, or to set up quirq infra (qq) for your GitHub org: the terminal
+checks your tools and opens a short form in your browser where you pick what to do.
 
 ```sh
 npx --allow-remote=root https://codeload.github.com/quirq-ai/setup/tar.gz/<commit>
@@ -17,10 +17,11 @@ refuses one without it. npm 11.14 and later honour the flag, though by default t
 tarball links. npm 10 and npm 11.0 to 11.13 ignore it. Either way it is harmless here, because the package has no
 dependencies.
 
-**The form only reads.** It shows the plan or prints commands and stops: it creates no repo,
-opens no pull request, changes no setting and installs nothing. The version that carries the plan out comes next, after review.
-Installing qq and xo on your own machine is a separate command, [`install`](#install-update-or-remove-qq-and-xo), which runs
-its commands only after you say yes.
+**The form changes nothing on GitHub.** For your org it shows the plan and stops: it creates no
+repo, opens no pull request and changes no setting. The version that carries the plan out comes
+next, after review. On your own machine, its first choice installs, updates or removes qq and xo:
+it shows the exact commands for what you pick and runs them when you press Run. The same is in the
+terminal as [`install`](#install-update-or-remove-qq-and-xo).
 
 ## What it does
 
@@ -29,9 +30,16 @@ its commands only after you say yes.
    run infra-config's generator and gate). It notes that the setup step will also need the `workflow` scope, and how to remove it
    afterwards. It never asks for `admin:org`, `delete_repo` or `gist`. It refuses to run while
    `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN` or `GITHUB_ENTERPRISE_TOKEN` is set, so it
-   only ever acts as your own `gh` login.
+   only ever acts as your own `gh` login. Without `git`, `gh` or a `gh` login the form still opens,
+   for this machine only.
 2. **Opens a form** on `127.0.0.1` (link printed in the terminal; `--no-browser` only prints it).
    It asks what you want to do:
+   - **Install, update or remove qq and xo on this machine** (the first choice). It shows what is
+     installed, as [`install`](#install-update-or-remove-qq-and-xo) does, and a choice per tool. Each
+     starts at Keep (or Don't install), so nothing is installed or removed until you pick it. It
+     shows the exact commands for what you picked, and Run runs them here, as you, with their
+     output on the page and in the terminal. Removing qq offers its demo folders and its
+     `QQ_PYTHON` line as unticked boxes. "Done: close qq-setup" stops the command.
    - **Install qq on my machine and work on a repo.** The terminal prints the commands from the
      [qq guide](https://docs.quirq.dev/docs/install) that install `qq` and `qqsync` and put them on your
      `PATH` (on a Mac, its Python step first), then `qq fetch https://github.com/<owner>/<name>` for the repo you name (`git clone` on a Mac),
@@ -72,7 +80,8 @@ for each tool: install it if it is missing (or reinstall it if it is there but b
 keep it if it is there. It prints the exact commands, runs them after you say yes, and stops at the first
 one that fails (each is safe to run again). It never writes to GitHub and needs no `gh` login. It changes
 files only in your home directory, except that on a Mac with no new enough Python its first step is
-`brew install python@3.13`, which writes to Homebrew's folder.
+`brew install python@3.13`, which writes to Homebrew's folder. While you are removing a tool, Enter
+at "Install xo?" installs nothing.
 
 - **qq** (with qqsync) installs with the [qq guide](https://docs.quirq.dev/docs/install)'s three commands.
   Updating reruns them, which deletes and re-clones `~/qq-tools/depot`, so qq is kept when the checkout
@@ -83,8 +92,9 @@ files only in your home directory, except that on a Mac with no new enough Pytho
   line is missing, it adds just that line. Removing deletes `~/qq-tools`, `~/.cache/qq` and the
   `PATH` line, as the guide's "Remove everything" does. That command also deletes the guide's demo
   folders, `~/qq-try` and `~/qq-ci-venv`, where your own clones may be: this asks about each by name,
-  and `--yes` keeps them. It leaves a `QQ_PYTHON` line, or a `PATH` line written another way, in your
-  startup file and says so.
+  and `--yes` keeps them. It asks too before deleting an `export QQ_PYTHON=python3.N` line (something
+  else may use that Python; `--yes` keeps it), and it leaves one written another way, or a `PATH`
+  line written another way, and says so.
 - **xo** installs at the commit the [xo quickstart](https://github.com/quirq-ai/xo/blob/main/docs/quickstart.md)
   pins, and updates with its `pip install --force-reinstall --no-deps` at that commit. An xo at another
   commit is reported, not called out of date, since the XO team may have given you a newer one; updating
@@ -95,8 +105,10 @@ files only in your home directory, except that on a Mac with no new enough Pytho
   install, run `xo login` with your XO API key.
 - **Python.** qq needs 3.11.4 or newer and xo 3.11: `QQ_PYTHON` if set, else `python3`, else the newest
   `python3.N` it finds. For qq, that name is then written to your startup file as `QQ_PYTHON`, so qq
-  finds it later. On a Mac with none, the first step is the qq guide's `brew install python@3.13` line
-  (just `brew install python@3.13` when only xo is wanted). It checks for `git` first.
+  finds it later. On a Mac with none, the first step is `brew install python@3.13`, then (for qq)
+  `export QQ_PYTHON=python3.13` goes into the same startup file as qq's `PATH` line. That differs
+  from the qq guide's Python line, which always writes `~/.zshrc`, so a bash user's next terminal
+  would have qq on `PATH` but no `QQ_PYTHON`. It checks for `git` first.
 - `--only qq` or `--only xo` picks one; `--update` or `--remove` answers for every tool; `--yes` asks
   nothing (without a terminal it needs it); `--dry-run` prints the commands and runs nothing.
 
@@ -119,6 +131,19 @@ files only in your home directory, except that on a Mac with no new enough Pytho
 - The page receives only names the command already read (orgs, repos, kinds), your platform name
   and the fixed text of the install path, never a token. Its answers are checked against those
   names before the terminal uses them.
+- The "This machine" choice never receives a command from the page. The page sends only a choice
+  per tool, which must be one the tool's state offers, with the signature of the look it shows;
+  qq-setup plans only while the machine still matches that look (so every warning on the page is
+  current), and keeps the plan under a random id. Run sends only that id, runs the latest plan once,
+  and first looks at the machine again: if anything changed (local work in qq, a tool added or
+  gone, a demo folder or `QQ_PYTHON` line), it refuses and the page shows the new state. Steps run
+  with no input from a terminal, one at a time, and stop at the first that fails. Only one run goes
+  at a time, and the form cannot be closed under it.
+- So the link now does more than read: whoever opens it first can run the steps the page offers,
+  including removing qq even with local work, deleting demo folders ticked on the page and logging
+  xo out. That is why the key works once, never travels on a command line when qq-setup opens the
+  browser, and why the terminal says when the link was used and when someone tries it again: if
+  you did not open it, press Ctrl-C.
 - No telemetry. The page loads nothing from the internet (no web fonts, strict CSP).
 
 ## On a Mac

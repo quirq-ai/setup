@@ -86,7 +86,9 @@ export const SYNC_PIN = /** @type {string} */ (/sync@([0-9a-f]{40})/.exec(INSTAL
 
 /**
  * @typedef {{ installed: boolean, broken: boolean, commit: string | null, latest: string | null,
- *   syncPin: string | null, onPath: boolean, behind: string[], localWork: string | null }} QqState
+ *   syncPin: string | null, onPath: boolean, behind: string[], localWork: string | null,
+ *   pythonLine: { line: string, files: string[] } | null }} QqState
+ *   pythonLine: an exact `export QQ_PYTHON=python3.N` line, the form qq-setup and the qq guide write
  * @typedef {{ installed: boolean, broken: boolean, pin: string | null, onPath: boolean, behind: string[],
  *   note: string | null, foreign: boolean }} XoState
  * @typedef {{ qq: QqState, xo: XoState }} State
@@ -111,6 +113,22 @@ function rcWith(home, test) {
     }
   });
 }
+
+/** The first exact QQ_PYTHON line in the startup files, and every file that has it. @param {string} home */
+function pythonLineIn(home) {
+  for (const f of RC_FILES) {
+    let text = "";
+    try {
+      text = readFileSync(join(home, f), "utf8");
+    } catch {
+      continue;
+    }
+    const line = text.split("\n").find((l) => PYTHON_LINE.test(l));
+    if (line) return { line, files: rcWith(home, (l) => l === line) };
+  }
+  return null;
+}
+const PYTHON_LINE = /^export QQ_PYTHON=python3\.\d+$/;
 
 /** The commit a pip venv installed a git package at. @param {string | null} freeze @param {string} pkg */
 export function pinIn(freeze, pkg) {
@@ -190,7 +208,7 @@ export async function detect({ home, latest, run = read }) {
     : null;
   return {
     qq: { installed: qqHere, broken: !qqHere && existsSync(depot), commit, latest: latest ?? null, syncPin, onPath: qqOnPath,
-      behind: qqBehind, localWork: work.length ? work.join(" and ") : null },
+      behind: qqBehind, localWork: work.length ? work.join(" and ") : null, pythonLine: pythonLineIn(home) },
     xo: { installed: xoHere, broken: xoVenv && !xoHere, foreign: xoDir && !xoVenv, pin, onPath: xoOnPath, behind: xoHere && !xoOnPath ? [NOT_ON_PATH] : [], note },
   };
 }
@@ -247,11 +265,12 @@ export function pythonFloor(a) {
  * The steps for the chosen actions, in order: Python first when an install needs it, then qq, then xo.
  * @param {{ qq: Action, xo: Action }} actions
  * @param {State} state
- * @param {{ python: PythonPick, platform: string, git: boolean, demo?: string[] }} ctx
- *   git: git is installed; demo: the guide's demo folders to delete with qq
+ * @param {{ python: PythonPick, platform: string, git: boolean, demo?: string[], pythonLine?: boolean }} ctx
+ *   git: git is installed; demo: the guide's demo folders to delete with qq; pythonLine: also delete
+ *   qq's exact QQ_PYTHON line with qq
  * @returns {{ steps: Step[], stop: string | null }}  stop: why nothing can run
  */
-export function planSteps(actions, state, { python, platform, git, demo = [] }) {
+export function planSteps(actions, state, { python, platform, git, demo = [], pythonLine = false }) {
   /** @type {Step[]} */
   const steps = [];
   const qq = usesQq(actions);
@@ -264,7 +283,10 @@ export function planSteps(actions, state, { python, platform, git, demo = [] }) 
     if (platform !== "darwin") {
       return { steps, stop: `${qq ? "qq" : "xo"} needs Python ${floor} or newer (found ${python.version ?? "none"}): install one, and set QQ_PYTHON to it unless it is python3` };
     }
-    steps.push(qq ? MAC_PYTHON : BREW_PYTHON);
+    // Not the guide's MAC_PYTHON, which always writes ~/.zshrc: a bash user's next terminal would
+    // have qq on PATH but no QQ_PYTHON. The line goes where the PATH step puts qq's.
+    steps.push(BREW_PYTHON);
+    if (qq) steps.push(persistPython("python3.13"));
   } else if (qq && python.persist && python.cmd) {
     steps.push(persistPython(python.cmd));
   }
@@ -274,6 +296,10 @@ export function planSteps(actions, state, { python, platform, git, demo = [] }) 
     steps.push({ what: "Remove qq, qqsync and qq's cache (~/qq-tools, ~/.cache/qq)", cmd: QQ_REMOVE_TOOLS });
     for (const d of demo) steps.push({ what: `Delete ~/${d}, the qq guide's demo folder`, cmd: `rm -rf ~/${d}` });
     steps.push({ what: "Remove qq's PATH line", cmd: cleanTmp(QQ_REMOVE[1]) });
+    const py = state.qq.pythonLine;
+    if (pythonLine && py) {
+      steps.push({ what: `Remove the ${py.line} line (${py.files.map((f) => `~/${f}`).join(", ")})`, cmd: cleanTmp(removeLineCmd(py.line, "QQ_PYTHON")) });
+    }
   }
   if (xo) steps.push(XO.install);
   else if (actions.xo === "update") steps.push(XO.update);
@@ -285,6 +311,56 @@ export function planSteps(actions, state, { python, platform, git, demo = [] }) 
 
 /** The tool's only problem is its missing PATH line. @param {{ behind: string[] }} t */
 export const pathOnly = (t) => t.behind.length === 1 && t.behind[0] === NOT_ON_PATH;
+
+/**
+ * What a person may choose for one tool in its state, first the default (defaultAction with no flags):
+ * the same choices the terminal asks about. Remove is never first, and a ~/.xo that is not xo's offers
+ * nothing.
+ * @param {QqState | XoState} t @returns {Action[]}
+ */
+export function choices(t) {
+  /** @type {Action[]} */
+  const all = "foreign" in t && t.foreign ? []
+    : t.broken ? ["install", "remove", "keep"]
+      : !t.installed ? ["install", "keep"]
+        : pathOnly(t) ? ["path", "update", "remove", "keep"]
+          : ["keep", "update", "remove"];
+  const first = defaultAction(t, {});
+  return all.includes(first) ? [first, ...all.filter((a) => a !== first)] : all;
+}
+
+/**
+ * Everything the steps need: the Python and git checks, the steps in order, and the environment they
+ * run with (QQ_PYTHON set to the Python picked, or brew's python3.13 once the Mac step has run).
+ * @param {{ qq: Action, xo: Action }} actions @param {State} state
+ * @param {{ demo: string[], pythonLine?: boolean, env: NodeJS.ProcessEnv, platform: string, run: Read }} o
+ * @returns {Promise<{ steps: Step[], stop: string | null, python: PythonPick, env: NodeJS.ProcessEnv }>}
+ */
+export async function prepare(actions, state, { demo, pythonLine = false, env, platform, run }) {
+  const needs = usesQq(actions) || freshXo(actions, state);
+  const python = needs ? await pickPython(env, pythonFloor(actions), run) : { cmd: null, version: null, ok: true, persist: false };
+  const git = !needs || (await run("git", ["--version"], env)) !== null;
+  const { steps, stop } = planSteps(actions, state, { python, platform, git, demo, pythonLine });
+  const py = python.ok ? python.cmd : platform === "darwin" ? "python3.13" : null;
+  return { steps, stop, python, env: py ? { ...env, QQ_PYTHON: py } : env };
+}
+
+/** What to tell the person after the steps ran. @param {{ qq: Action, xo: Action }} actions @param {string} home */
+export function afterNotes(actions, home) {
+  /** @type {string[]} */
+  const lines = [];
+  if (actions.qq === "remove") {
+    for (const rc of rcWith(home, (l) => /^\s*export QQ_PYTHON=/.test(l))) {
+      lines.push(`~/${rc} still sets QQ_PYTHON; delete that line unless something else uses that Python.`);
+    }
+  }
+  // The remove steps delete only the exact lines the install writes; say where another form is left.
+  for (const [tool, dir] of /** @type {const} */ ([["qq", "qq-tools/bin:"], ["xo", ".xo/bin:"]])) {
+    if (actions[tool] !== "remove") continue;
+    for (const rc of rcWith(home, (l) => l.includes(dir))) lines.push(`~/${rc} still has a line naming ${dir.slice(0, -1)}; delete it yourself.`);
+  }
+  return lines;
+}
 
 /** One line per tool for the terminal. @param {State} s @returns {string[]} */
 export function describe(s) {
@@ -445,7 +521,10 @@ export async function main(argv, io = realIo()) {
         const a = await choose(prompt, `${tool} is installed but not on PATH. Add the PATH line, update, remove or keep it? [A/u/r/k] `, ["add", "update", "remove", "keep"]);
         actions[tool] = a === "add" ? "path" : /** @type {Action} */ (a);
       } else if (!t.installed) {
-        actions[tool] = (await choose(prompt, `Install ${tool}? [Y/n] `, ["yes", "no"])) === "yes" ? "install" : "keep";
+        // While removing something, Enter installs nothing.
+        const removing = Object.values(actions).includes("remove");
+        actions[tool] = (await choose(prompt, removing ? `Install ${tool}? [y/N] ` : `Install ${tool}? [Y/n] `,
+          removing ? ["no", "yes"] : ["yes", "no"])) === "yes" ? "install" : "keep";
       } else if (t.behind.length && !work) {
         out(`  ${tool}: ${t.behind.join("; ")}`);
         actions[tool] = /** @type {Action} */ (await choose(prompt, `${tool} is installed. Update, remove or keep it? [U/r/k] `, ["update", "remove", "keep"]));
@@ -461,11 +540,15 @@ export async function main(argv, io = realIo()) {
         else out(`  kept ~/${d}`);
       }
     }
+    // The QQ_PYTHON line may serve something else too: deleted only on a yes, never under --yes.
+    let pythonLine = false;
+    const py = state.qq.pythonLine;
+    if (actions.qq === "remove" && py) {
+      const where = py.files.map((x) => `~/${x}`).join(", ");
+      pythonLine = !!prompt && (await choose(prompt, `Also delete the ${py.line} line from ${where} (unless something else uses that Python)? [y/N] `, ["no", "yes"])) === "yes";
+    }
 
-    const python = usesQq(actions) || freshXo(actions, state)
-      ? await pickPython(io.env, pythonFloor(actions), io.run) : { cmd: null, version: null, ok: true, persist: false };
-    const git = !(usesQq(actions) || freshXo(actions, state)) || (await io.run("git", ["--version"], io.env)) !== null;
-    const { steps, stop } = planSteps(actions, state, { python, platform: io.platform, git, demo });
+    const { steps, stop, python, env } = await prepare(actions, state, { demo, pythonLine, env: io.env, platform: io.platform, run: io.run });
     if (stop) return err(`\nqq-setup install: ${stop}`), 1;
     if (!steps.length) return out("\nNothing to do."), 0;
     out(`\n${f.dryRun ? "It would run" : "It will run"} these, in order:`);
@@ -476,9 +559,6 @@ export async function main(argv, io = realIo()) {
     if (!go) return out("Nothing was run."), 1;
     prompt?.close();
 
-    // The Python the steps use: the one picked, or brew's python3.13 once the Mac step has run.
-    const py = python.ok ? python.cmd : io.platform === "darwin" ? "python3.13" : null;
-    const env = py ? { ...io.env, QQ_PYTHON: py } : io.env;
     for (const [i, s] of steps.entries()) {
       out(`\n[${i + 1}/${steps.length}] ${s.what}`);
       const code = await io.runStep(s.cmd, env);
@@ -489,16 +569,7 @@ export async function main(argv, io = realIo()) {
     }
     out("\nDone. Open a new terminal so PATH (and QQ_PYTHON) take effect.");
     if (actions.xo === "install") out("Then log xo in with your XO API key:  xo login");
-    if (actions.qq === "remove") {
-      for (const rc of rcWith(home, (l) => /^\s*export QQ_PYTHON=/.test(l))) {
-        out(`~/${rc} still sets QQ_PYTHON; delete that line unless something else uses that Python.`);
-      }
-    }
-    // The remove steps delete only the exact lines the install writes; say where another form is left.
-    for (const [tool, dir] of /** @type {const} */ ([["qq", "qq-tools/bin:"], ["xo", ".xo/bin:"]])) {
-      if (actions[tool] !== "remove") continue;
-      for (const rc of rcWith(home, (l) => l.includes(dir))) out(`~/${rc} still has a line naming ${dir.slice(0, -1)}; delete it yourself.`);
-    }
+    for (const line of afterNotes(actions, home)) out(line);
     return 0;
   } finally {
     prompt?.close();
