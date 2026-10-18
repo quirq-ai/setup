@@ -2,8 +2,9 @@
 // @ts-check
 // qq-setup: set up quirq infra (qq) for a GitHub org, or put qq on this machine to work on a repo that
 // already uses it. The terminal checks your tools, a local form in your browser asks which, and the
-// terminal shows the plan or prints the install commands.
-// THIS BUILD IS READ-ONLY: it reads GitHub through your gh login and writes nothing anywhere.
+// terminal shows the plan or prints the install commands. `qq-setup install` installs, updates or removes
+// qq and xo on this machine (cli/install.mjs), after showing the commands and a yes.
+// IT NEVER WRITES TO GITHUB: it reads GitHub through your gh login; only `install` writes, under your home.
 
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -32,8 +33,10 @@ npm 12 runs a package from a tarball link only with --allow-remote=root.
 Checks your tools and gh login, then opens a form on 127.0.0.1 with two choices:
   - set up repos in an org you own: pick the org and repos, and the plan prints here;
   - work on a repo that already uses qq: the commands that install qq print here.
-This version only reads: it changes nothing on GitHub and installs nothing.
+The form only reads: it changes nothing on GitHub and installs nothing.
 
+  install        install, update or remove qq and xo on this machine instead: it shows what is
+                 installed, asks, prints the commands and runs them after a yes (install --help)
   --no-browser   print the form's link instead of opening it
   --port N       serve the form on 127.0.0.1:N (default: a free port). Over SSH, forward the
                  same port number:  ssh -L N:127.0.0.1:N <host>, then open the printed link
@@ -43,6 +46,7 @@ This version only reads: it changes nothing on GitHub and installs nothing.
 const bold = (/** @type {string} */ s) => (process.stdout.isTTY && !process.env.NO_COLOR ? `\x1b[1m${s}\x1b[0m` : s);
 
 async function main(argv = process.argv.slice(2)) {
+  if (argv[0] === "install") return (await import("./install.mjs")).main(argv.slice(1));
   const pkg = JSON.parse(await readFile(join(ROOT, "package.json"), "utf8"));
   const known = new Set(["--no-browser", "--version", "--help", "-h"]);
   let port = 0;
@@ -205,7 +209,8 @@ async function main(argv = process.argv.slice(2)) {
   if ("tools" in answers) {
     console.log("");
     for (const line of toolsText(answers.tools, process.platform)) console.log(line);
-    console.log(`\n${bold("Nothing was installed.")} qq-setup only printed the commands; run them yourself.`);
+    console.log(`\n${bold("Nothing was installed.")} qq-setup only printed the commands; run them yourself, or run qq-setup again`);
+    console.log("with install after the link (…/tar.gz/<commit> install) to have it check what is here and run them for you.");
     return 0;
   }
   const a = answers;

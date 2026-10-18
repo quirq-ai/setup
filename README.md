@@ -17,8 +17,10 @@ refuses one without it. npm 11.14 and later honour the flag, though by default t
 tarball links. npm 10 and npm 11.0 to 11.13 ignore it. Either way it is harmless here, because the package has no
 dependencies.
 
-**This version only reads.** It shows the plan or prints commands and stops: it creates no repo,
+**The form only reads.** It shows the plan or prints commands and stops: it creates no repo,
 opens no pull request, changes no setting and installs nothing. The version that carries the plan out comes next, after review.
+Installing qq and xo on your own machine is a separate command, [`install`](#install-update-or-remove-qq-and-xo), which runs
+its commands only after you say yes.
 
 ## What it does
 
@@ -57,6 +59,31 @@ requests addressed to `127.0.0.1:N`, so a forward to a different local port is r
 Exit codes, as gate and installer use them: 0 done, 1 not ready or stopped (a failed check, or no
 request from the form for 30 minutes), 2 error. Ctrl-C stops it by signal, which shells report as
 130.
+
+## Install, update or remove qq and xo
+
+```sh
+npx --allow-remote=root https://codeload.github.com/quirq-ai/setup/tar.gz/<commit> install
+```
+
+It looks at what is already on this machine and says so: qq's commit in `~/qq-tools/depot` and the newest
+one on GitHub, qqsync's commit, xo's commit in `~/.xo`, and whether each is on your `PATH`. Then it asks,
+for each tool: install it if it is missing; update, remove or keep it if it is there. It prints the
+exact commands, runs them after you say yes, and stops at the first one that fails (each is safe to run
+again). It writes only under your home directory and never to GitHub, and needs no `gh` login.
+
+- **qq** (with qqsync) installs with the [qq guide](https://docs.quirq.dev/docs/install)'s three commands
+  and is removed with its "Remove everything" commands, which also delete the guide's demo folders
+  (`~/qq-try`, `~/qq-ci-venv`) and qq's cache. Updating reruns the install.
+- **xo** installs at the commit the [xo quickstart](https://github.com/quirq-ai/xo/blob/main/docs/quickstart.md)
+  pins, updates with its `pip install --force-reinstall --no-deps` at that commit, and is removed with
+  `xo logout` (which deletes the saved XO key), `rm -rf ~/.xo` and its `PATH` line. After an install, run
+  `xo login` with your XO API key.
+- **Python.** Both need Python 3.11.4 or newer: `QQ_PYTHON` if set, else `python3`, else the newest
+  `python3.N` it finds, which it then writes to your startup file as `QQ_PYTHON` so qq finds it later. On a
+  Mac with none, the first step is the qq guide's `brew install python@3.13` line.
+- `--only qq` or `--only xo` picks one; `--update` or `--remove` answers for every tool; `--yes` asks
+  nothing (without a terminal it needs it); `--dry-run` prints the commands and runs nothing.
 
 ## How it keeps your login safe
 
