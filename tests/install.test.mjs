@@ -10,7 +10,7 @@ import {
   BREW_PYTHON, cleanTmp, DEMO, defaultAction, describe, detect, localWork, main, persistPython, pickPython, pinIn, planSteps, pythonOk,
   QQ_REMOVE, QQ_REMOVE_TOOLS, read, removeLineCmd, SYNC_PIN, XO, XO_PATH_LINE, XO_PIN, XO_SPEC,
 } from "../cli/install.mjs";
-import { INSTALL } from "../cli/tools.mjs";
+import { INSTALL, MAC_PYTHON } from "../cli/tools.mjs";
 
 /** The commands of a fixture, and the commit its header names. @param {string} name */
 function fixture(name) {
@@ -51,8 +51,8 @@ test("xo's commands follow the xo quickstart at the commit install.mjs names", (
   assert.equal(BREW_PYTHON.cmd, "brew install python@3.13");
 });
 
-test("zsh-safe: no comment or history characters in anything install runs", () => {
-  const all = [QQ_REMOVE_TOOLS, cleanTmp(QQ_REMOVE[1]), XO.install.cmd, XO.path.cmd, XO.update.cmd, ...XO.remove.map((s) => s.cmd)];
+test("zsh-safe: no comment or history characters in anything install runs or the page shows", () => {
+  const all = [...INSTALL.map((s) => s.cmd), MAC_PYTHON.cmd, QQ_REMOVE_TOOLS, cleanTmp(QQ_REMOVE[1]), XO.install.cmd, XO.path.cmd, XO.update.cmd, ...XO.remove.map((s) => s.cmd)];
   for (const c of all) assert.doesNotMatch(c, /[#!]/, c);
 });
 

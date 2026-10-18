@@ -5,7 +5,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { SYNC_PIN, XO_PIN } from "../../cli/install.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -252,11 +252,17 @@ test("each command has a copy button that copies it exactly", async ({ browser }
   }
 });
 
+/** Where an element ends, in the viewport. */
+async function bottom(el: Locator): Promise<number> {
+  const b = (await el.boundingBox())!;
+  return b.y + b.height;
+}
+
 /** The page opens at step 1 and asks for qq first when qq is missing; with qq, at the top. */
-for (const width of [390, 1280]) {
+for (const width of [320, 390, 1280]) {
   test(`one page ${width}px: qq first, then the org, with a steps bar that moves between them`, async ({ browser }) => {
     const missing = await startCli();
-    const page = await browser.newPage({ viewport: { width, height: width === 390 ? 844 : 800 } });
+    const page = await browser.newPage({ viewport: { width, height: width === 1280 ? 800 : 844 } });
     try {
       await page.goto(missing.url);
       await expect(page.getByText("Start here: qq is not on this machine")).toBeVisible();
@@ -274,10 +280,13 @@ for (const width of [390, 1280]) {
       const step2 = page.getByRole("heading", { name: "2. Set up repos in an org you own" });
       await expect(step2).toBeInViewport();
       await expect(steps).toBeInViewport();
+      // The bar wraps to two lines at 320 px: the step's heading still lands below it, not under it.
+      await expect.poll(async () => (await step2.boundingBox())!.y - (await bottom(steps))).toBeGreaterThanOrEqual(0);
       await expect(page.getByRole("radio", { name: /acme-labs/ })).toBeChecked();
       await steps.getByRole("button", { name: "1. This machine" }).click();
       await expect(step1).toBeInViewport();
       await expect(steps).toBeInViewport();
+      await expect.poll(async () => (await step1.boundingBox())!.y - (await bottom(steps))).toBeGreaterThanOrEqual(0);
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
       expect(overflow).toBeLessThanOrEqual(0);
     } finally {
@@ -332,6 +341,11 @@ for (const scheme of ["light", "dark"] as const) {
         await expect(page.getByText("1. Log xo out", { exact: false })).toBeVisible();
         await expect(page.getByText("rm -rf ~/.xo", { exact: true })).toBeVisible();
         await expect(page.getByText(/xo logout keeps your gh login/)).toBeVisible();
+        // Commands never wrap, so no word is split: each block scrolls on its own, the page does not.
+        for (const pre of await page.locator("pre").all()) {
+          expect(await pre.evaluate((el) => getComputedStyle(el).whiteSpace)).toBe("pre");
+          expect(await pre.evaluate((el) => getComputedStyle(el).overflowX)).toBe("auto");
+        }
         const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
         expect(overflow).toBeLessThanOrEqual(0);
         mkdirSync(SHOTS, { recursive: true });

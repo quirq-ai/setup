@@ -248,7 +248,7 @@ export function SetupForm() {
       )}
 
       {state && (
-        <section ref={machineRef} aria-labelledby="step-machine" className="flex scroll-mt-16 flex-col gap-6">
+        <section ref={machineRef} aria-labelledby="step-machine" className="flex scroll-mt-24 flex-col gap-6">
           <h2 id="step-machine" className="font-display text-xl">
             1. Install, update or remove qq and xo on this machine
           </h2>
@@ -264,7 +264,7 @@ export function SetupForm() {
       )}
 
       {state && (
-        <section ref={reposRef} aria-labelledby="step-repos" className="flex scroll-mt-16 flex-col gap-6">
+        <section ref={reposRef} aria-labelledby="step-repos" className="flex scroll-mt-24 flex-col gap-6">
           <h2 id="step-repos" className="font-display text-xl">
             2. Set up repos in an org you own
           </h2>
