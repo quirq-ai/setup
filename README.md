@@ -1,8 +1,8 @@
 # qq-setup
 
-One command to install, update or remove qq and xo on your machine, to put qq on your machine and
-work on a repo that already uses it, or to set up quirq infra (qq) for your GitHub org: the terminal
-checks your tools and opens a short form in your browser where you pick what to do.
+One command to install, update or remove qq and xo on your machine, and to set up quirq infra (qq)
+for your GitHub org: the terminal checks your tools and opens one page in your browser, qq on this
+machine first, then your org's repos.
 
 ```sh
 npx --allow-remote=root https://codeload.github.com/quirq-ai/setup/tar.gz/<commit>
@@ -19,7 +19,7 @@ dependencies.
 
 **The form changes nothing on GitHub.** For your org it shows the plan and stops: it creates no
 repo, opens no pull request and changes no setting. The version that carries the plan out comes
-next, after review. On your own machine, its first choice installs, updates or removes qq and xo:
+next, after review. On your own machine, its first step installs, updates or removes qq and xo:
 it shows the exact commands for what you pick and runs them when you press Run. The same is in the
 terminal as [`install`](#install-update-or-remove-qq-and-xo).
 
@@ -33,20 +33,16 @@ terminal as [`install`](#install-update-or-remove-qq-and-xo).
    only ever acts as your own `gh` login. Without `git`, `gh` or a `gh` login the form still opens,
    for this machine only.
 2. **Opens a form** on `127.0.0.1` (link printed in the terminal; `--no-browser` only prints it).
-   It asks what you want to do:
-   - **Install, update or remove qq and xo on this machine** (the first choice). It shows what is
+   It is one page in two steps, with a bar at the top that takes you to either. When qq is not on
+   this machine, the page opens at step 1 and asks you to install qq first.
+   - **1. Install, update or remove qq and xo on this machine.** It shows what is
      installed, as [`install`](#install-update-or-remove-qq-and-xo) does, and a choice per tool. Each
      starts at Keep (or Don't install), so nothing is installed or removed until you pick it. It
      shows the exact commands for what you picked, and Run runs them here, as you, with their
      output on the page and in the terminal. Removing qq offers its demo folders and its
      `QQ_PYTHON` line as unticked boxes. "Done: close qq-setup" stops the command.
-   - **Install qq on my machine and work on a repo.** The terminal prints the commands from the
-     [qq guide](https://docs.quirq.dev/docs/install) that install `qq` and `qqsync` and put them on your
-     `PATH` (on a Mac, its Python step first), then `qq fetch https://github.com/<owner>/<name>` for the repo you name (`git clone` on a Mac),
-     and what `qq sync`, `qq build`, `qq test` and `qq run` do (on a Mac, `qq build`, `qq test` and
-     `qq run`, with the caveat under "On a Mac"). It runs none of them. To push
-     branches to the repo, an owner gives you Write access. A login that owns no org starts here.
-   - **Set up repos in an org I own** (steps 3 and 4). You pick an org you own, the repos to put under qq and, optionally, a new starter repo.
+   - **2. Set up repos in an org you own** (the terminal then does 3 and 4 below). You pick an org you own, the repos to put under qq and, optionally, a new starter repo.
+   Without a `gh` login, or with no org you own, this step says what to fix instead.
    A repo is offered only when it can run its qq kind's commands as they are: Python service
    (`requirements.txt`), pytest (`requirements-dev.txt` listing pytest, and tests at the root), Next.js app (pnpm with
    `build` and `typecheck` scripts) or Gatsby site (pnpm with `build` and `test` scripts). Others
@@ -128,10 +124,10 @@ at "Install xo?" installs nothing.
   once used, so the key does not appear on a command line other users could see with `ps`. If you
   open the printed link by hand, it briefly can, which is why it works only once. Flatpak browsers,
   or a `.html` file that opens in an editor, need the printed link.
-- The page receives only names the command already read (orgs, repos, kinds), your platform name
-  and the fixed text of the install path, never a token. Its answers are checked against those
+- The page receives only names the command already read (orgs, repos, kinds) and your platform
+  name, never a token. Its answers are checked against those
   names before the terminal uses them.
-- The "This machine" choice never receives a command from the page. The page sends only a choice
+- The "This machine" step never receives a command from the page. The page sends only a choice
   per tool, which must be one the tool's state offers, with the signature of the look it shows;
   qq-setup plans only while the machine still matches that look (so every warning on the page is
   current), and keeps the plan under a random id. Run sends only that id, runs the latest plan once,
@@ -148,10 +144,10 @@ at "Install xo?" installs nothing.
 
 ## On a Mac
 
-It works the same. macOS ships Python 3.9, too old for qq, so on a Mac the install commands start
-with the qq guide's Python step: `brew install python@3.13`, `export QQ_PYTHON=python3.13` in
-`~/.zshrc`, and a new terminal. About toolchains, the form, the terminal and this section say the
-same thing:
+It works the same. macOS ships Python 3.9, too old for qq, so on a Mac with no newer Python,
+installing qq starts with `brew install python@3.13` and sets `QQ_PYTHON=python3.13` (see
+[Python](#install-update-or-remove-qq-and-xo) above). About toolchains, the terminal and this section
+say the same thing:
 
 qq fetches toolchains for Linux x86_64 only, so on a Mac qq fetch clones the repo and then stops with
 "no pin for platform", and qq sync stops the same way: clone with git and install the repo's pinned
@@ -159,9 +155,7 @@ tools yourself (qqsync show infra/repo.toml lists them). qq build and qq test th
 --toolchain NAME=ROOT or your PATH, and still check the pinned versions (exact Python, Node major);
 qq run uses your PATH.
 
-So on a Mac the form and terminal show `git clone` instead of `qq fetch`, leave out
-`qq sync`, and list `qq build`, `qq test` and `qq run`. See the
-[qq guide](https://docs.quirq.dev/docs/install). The CI workflows qq sets up for a repo run on
+See the [qq guide](https://docs.quirq.dev/docs/install). The CI workflows qq sets up for a repo run on
 GitHub's Linux runners, whatever machine you work on.
 
 ## Develop

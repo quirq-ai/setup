@@ -4,25 +4,22 @@ import { tmpdir } from "node:os";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
 import { SYNC_PIN, XO_PIN } from "../../cli/install.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const SHOTS = join(ROOT, "test-results", "screenshots");
-// The line that gets a repo: qq fetch, or git clone on a Mac, where qq fetch stops after cloning.
-const GET = process.platform === "darwin" ? "git clone" : "qq fetch";
-const AS_DARWIN = ["--import", pathToFileURL(join(ROOT, "tests", "e2e", "as-darwin.mjs")).href];
 
 type Cli = { proc: ChildProcess; url: string; output: () => string; exited: Promise<number | null> };
 
 /** Start the real CLI with the fake gh first on PATH, no token variables and a scratch HOME (so the
  * "This machine" panel never looks at, or runs anything in, the real one). */
-async function startCli(extra: Record<string, string> = {}, nodeArgs: string[] = []): Promise<Cli> {
+async function startCli(extra: Record<string, string> = {}): Promise<Cli> {
   const HOME = mkdtempSync(join(tmpdir(), "qq-setup-e2e-home-"));
   const env: NodeJS.ProcessEnv = { ...process.env, HOME, PATH: `${join(ROOT, "tests", "fake-gh")}:${process.env.PATH}`, NO_COLOR: "1", ...extra };
   for (const v of ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"]) delete env[v];
-  const proc = spawn(process.execPath, [...nodeArgs, join(ROOT, "cli", "bin.mjs"), "--no-browser"], { env });
+  const proc = spawn(process.execPath, [join(ROOT, "cli", "bin.mjs"), "--no-browser"], { env });
   let out = "";
   proc.stdout!.on("data", (c) => (out += c));
   proc.stderr!.on("data", (c) => (out += c));
@@ -40,11 +37,6 @@ async function startCli(extra: Record<string, string> = {}, nodeArgs: string[] =
   return { proc, url, output: () => out, exited };
 }
 
-/** The form opens on "This machine"; the org setup is the third choice. */
-async function pickRepos(page: Page) {
-  await page.getByRole("radio", { name: "Set up repos in an org I own" }).check();
-}
-
 for (const scheme of ["light", "dark"] as const) {
   for (const width of [390, 1280]) {
     test(`form ${width}px ${scheme}: pick repos and a starter, plan prints in the terminal`, async ({ browser }) => {
@@ -52,7 +44,6 @@ for (const scheme of ["light", "dark"] as const) {
       const page = await browser.newPage({ viewport: { width, height: width === 390 ? 844 : 800 }, colorScheme: scheme });
       try {
         await page.goto(cli.url);
-        await pickRepos(page);
         // One org is usable, so it is picked for the user; the member-only org is shown disabled.
         await expect(page.getByRole("radio", { name: /acme-labs/ })).toBeChecked();
         await expect(page.getByRole("radio", { name: /big-co/ })).toBeDisabled();
@@ -77,6 +68,7 @@ for (const scheme of ["light", "dark"] as const) {
         expect(overflow).toBeLessThanOrEqual(0);
 
         mkdirSync(SHOTS, { recursive: true });
+        await page.evaluate(() => window.scrollTo(0, 0)); // the sticky steps bar sits at the top of a full-page shot
         await page.screenshot({ path: join(SHOTS, `form-${width}-${scheme}.png`), fullPage: true });
 
         await page.getByRole("button", { name: /Show the plan/ }).click();
@@ -108,7 +100,6 @@ test("a starter name taken by a repo the form did not list is refused", async ({
   const page = await browser.newPage();
   try {
     await page.goto(cli.url);
-    await pickRepos(page);
     await expect(page.getByRole("radio", { name: /acme-labs/ })).toBeChecked();
     await page.getByRole("checkbox", { name: "Create a starter repo" }).check();
     // The form uses the terminal's own name rule (cli/names.mjs), so .git in any case is refused here.
@@ -144,7 +135,6 @@ test("the link works once: the key leaves the address bar, and no other tab, bro
   try {
     const page = await first.newPage();
     await page.goto(cli.url);
-    await pickRepos(page);
     await expect(page.getByRole("radio", { name: /acme-labs/ })).toBeChecked();
     expect(page.url()).not.toContain("key=");
     const cookies = await first.cookies();
@@ -152,7 +142,6 @@ test("the link works once: the key leaves the address bar, and no other tab, bro
     expect(cookies[0]).toMatchObject({ httpOnly: true, sameSite: "Strict", path: "/api" });
     // A reload keeps working on this tab's session.
     await page.reload();
-    await pickRepos(page);
     await expect(page.getByRole("radio", { name: /acme-labs/ })).toBeChecked();
 
     // Another tab in the same browser has the cookie but not the tab's token.
@@ -227,68 +216,15 @@ test("a page without the key gets nothing from the API", async ({ browser }) => 
   }
 });
 
-for (const scheme of ["light", "dark"] as const) {
-  for (const width of [390, 1280]) {
-    test(`tools ${width}px ${scheme}: the install and fetch commands print in the terminal`, async ({ browser }) => {
-      const cli = await startCli();
-      const page = await browser.newPage({ viewport: { width, height: width === 390 ? 844 : 800 }, colorScheme: scheme });
-      try {
-        await page.goto(cli.url);
-        await page.getByRole("radio", { name: "Install qq on my machine and work on a repo" }).check();
-        await expect(page.getByRole("radio", { name: /acme-labs/ })).toHaveCount(0);
-        await expect(page.getByText("1. Install qq on this machine")).toBeVisible();
-        await expect(page.getByText(/git clone -q https:\/\/github\.com\/quirq-ai\/qq /)).toBeVisible();
-        for (const notARepo of [".git", "https://github.com/"]) {
-          await page.getByLabel("Repo (optional)").fill(notARepo);
-          await expect(page.getByText("Write it as owner/name, like quirq-ai/innernet.")).toBeVisible();
-        }
-        await page.getByLabel("Repo (optional)").fill("innernet");
-        await expect(page.getByText("Write it as owner/name, like quirq-ai/innernet.")).toBeVisible();
-        await expect(page.getByRole("button", { name: /Print these/ })).toBeDisabled();
-        // A pasted link with .git is taken as the owner/name it names.
-        await page.getByLabel("Repo (optional)").fill("https://github.com/quirq-ai/innernet.git");
-        await expect(page.getByText(`${GET} https://github.com/quirq-ai/innernet`, { exact: true })).toBeVisible();
-        await expect(page.getByText("Write it as owner/name", { exact: false })).toHaveCount(0);
-        // Commands never wrap, so no word is split: each block scrolls on its own, the page does not.
-        for (const pre of await page.locator("pre").all()) {
-          expect(await pre.evaluate((el) => getComputedStyle(el).whiteSpace)).toBe("pre");
-          expect(await pre.evaluate((el) => getComputedStyle(el).overflowX)).toBe("auto");
-        }
-
-        const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-        expect(overflow).toBeLessThanOrEqual(0);
-        mkdirSync(SHOTS, { recursive: true });
-        await page.screenshot({ path: join(SHOTS, `tools-${width}-${scheme}.png`), fullPage: true });
-
-        await page.getByRole("button", { name: /Print these/ }).click();
-        await expect(page.getByText("qq-setup printed the commands there.", { exact: false })).toBeVisible();
-        expect(await cli.exited).toBe(0);
-        const out = cli.output();
-        expect(out).toContain("Install qq on this machine. Run each command once:");
-        expect(out).toContain(`${GET} https://github.com/quirq-ai/innernet`);
-        expect(out).toContain("Nothing was installed.");
-        expect(out).not.toContain("Plan for");
-      } finally {
-        cli.proc.kill();
-        await page.close();
-      }
-    });
-  }
-}
-
-test("a login that owns no org gets this machine and the install commands, not the org setup", async ({ browser }) => {
+test("a login that owns no org gets this machine, and step 2 says how to get an org", async ({ browser }) => {
   const cli = await startCli({ FAKE_GH_NO_ORGS: "1" });
   const page = await browser.newPage();
   try {
     expect(cli.output()).toContain("owns no GitHub org, so the form can only install qq and xo here");
     await page.goto(cli.url);
-    await expect(page.getByRole("radio", { name: "Install, update or remove qq and xo on this machine" })).toBeChecked();
+    await expect(page.getByRole("radiogroup", { name: "What to do with qq" })).toBeVisible();
     await expect(page.getByText(/You own no GitHub org yet/)).toBeVisible();
-    await expect(page.getByRole("radio", { name: "Set up repos in an org I own" })).toBeDisabled();
-    await page.getByRole("radio", { name: "Install qq on my machine and work on a repo" }).check();
-    await page.getByRole("button", { name: /Print these/ }).click();
-    expect(await cli.exited).toBe(0);
-    expect(cli.output()).toContain(`${GET} https://github.com/OWNER/NAME`);
+    await expect(page.getByRole("radiogroup", { name: "Your org" })).toHaveCount(0);
   } finally {
     cli.proc.kill();
     await page.close();
@@ -301,9 +237,8 @@ test("each command has a copy button that copies it exactly", async ({ browser }
   const page = await context.newPage();
   try {
     await page.goto(cli.url);
-    await page.getByRole("radio", { name: "Install qq on my machine and work on a repo" }).check();
-    const getRepo = process.platform === "darwin" ? "Copy: Clone the repo" : "Copy: Get the repo";
-    for (const name of ["Copy: Install qq", "Copy: Install qqsync", "Copy: Put both on your PATH", getRepo]) {
+    await page.getByRole("radiogroup", { name: "What to do with qq" }).getByRole("radio", { name: "Install", exact: true }).check();
+    for (const name of ["Copy: Install qq", "Copy: Install qqsync"]) {
       await expect(page.getByRole("button", { name, exact: true })).toHaveCount(1);
     }
     await page.getByRole("button", { name: "Copy: Install qq", exact: true }).click();
@@ -317,41 +252,52 @@ test("each command has a copy button that copies it exactly", async ({ browser }
   }
 });
 
-test("on a Mac: git clone, the note beside it, and no qq sync", async ({ browser }) => {
-  const cli = await startCli({}, AS_DARWIN);
-  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
-  try {
-    expect(cli.output()).toContain("macOS: setup works here.");
-    await page.goto(cli.url);
-    await page.getByRole("radio", { name: "Install qq on my machine and work on a repo" }).check();
-    // A tab is not blank: the page refuses it, as the terminal does.
-    await page.getByLabel("Repo (optional)").fill("\t");
-    await expect(page.getByText("Write it as owner/name, like quirq-ai/innernet.")).toBeVisible();
-    await expect(page.getByRole("button", { name: /Print these/ })).toBeDisabled();
-    await page.getByLabel("Repo (optional)").fill("quirq-ai/innernet");
-    // A Mac's python3 is 3.9: the qq guide's Python step comes before the install commands.
-    await expect(page.locator("pre").first()).toHaveText(
-      "brew install python@3.13 && { grep -qs 'QQ_PYTHON=' ~/.zshrc || echo 'export QQ_PYTHON=python3.13' >> ~/.zshrc; }");
-    await expect(page.getByText("git clone https://github.com/quirq-ai/innernet", { exact: true })).toBeVisible();
-    await expect(page.getByText(/stops with "no pin for platform".*--toolchain NAME=ROOT/)).toBeVisible();
-    await expect(page.getByText(/^qq fetch https/)).toHaveCount(0);
-    await expect(page.getByText("qq sync", { exact: true })).toHaveCount(0);
-    for (const cmd of ["qq build [TARGET]", "qq test [TARGET]", 'qq run "COMMAND"']) {
-      await expect(page.getByText(cmd, { exact: true })).toHaveCount(1);
+/** The page opens at step 1 and asks for qq first when qq is missing; with qq, at the top. */
+for (const width of [390, 1280]) {
+  test(`one page ${width}px: qq first, then the org, with a steps bar that moves between them`, async ({ browser }) => {
+    const missing = await startCli();
+    const page = await browser.newPage({ viewport: { width, height: width === 390 ? 844 : 800 } });
+    try {
+      await page.goto(missing.url);
+      await expect(page.getByText("Start here: qq is not on this machine")).toBeVisible();
+      // The page scrolled down to step 1 (as far as the page is tall), with qq's choice in view.
+      await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+      const step1 = page.getByRole("heading", { name: "1. Install, update or remove qq and xo on this machine" });
+      await expect(step1).toBeInViewport();
+      await expect(page.getByRole("radiogroup", { name: "What to do with qq" })).toBeInViewport();
+      mkdirSync(SHOTS, { recursive: true });
+      await page.screenshot({ path: join(SHOTS, `one-page-start-${width}.png`) });
+      await expect(page.getByText("qq is not on this machine yet: install it in step 1 first.")).toBeVisible();
+      // The steps bar stays in view and takes the reader to each step.
+      const steps = page.getByRole("navigation", { name: "Steps" });
+      await steps.getByRole("button", { name: "2. Your org's repos" }).click();
+      const step2 = page.getByRole("heading", { name: "2. Set up repos in an org you own" });
+      await expect(step2).toBeInViewport();
+      await expect(steps).toBeInViewport();
+      await expect(page.getByRole("radio", { name: /acme-labs/ })).toBeChecked();
+      await steps.getByRole("button", { name: "1. This machine" }).click();
+      await expect(step1).toBeInViewport();
+      await expect(steps).toBeInViewport();
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+      expect(overflow).toBeLessThanOrEqual(0);
+    } finally {
+      missing.proc.kill();
     }
-    mkdirSync(SHOTS, { recursive: true });
-    await page.screenshot({ path: join(SHOTS, "tools-390-mac.png"), fullPage: true });
-    await page.getByRole("button", { name: /Print these/ }).click();
-    expect(await cli.exited).toBe(0);
-    const out = cli.output();
-    expect(out).toContain("     git clone https://github.com/quirq-ai/innernet\n");
-    expect(out).not.toMatch(/qq fetch https|^ +qq sync/m);
-    expect(out).toMatch(/Inside it:\n +qq build/);
-  } finally {
-    cli.proc.kill();
-    await page.close();
-  }
-});
+
+    const { env } = homeWithQq();
+    const installed = await startCli(env);
+    try {
+      await page.goto(installed.url);
+      await expect(page.getByRole("radiogroup", { name: "What to do with qq" }).getByRole("radio", { name: "Keep" })).toBeChecked();
+      await expect(page.getByText("Start here: qq is not on this machine")).toHaveCount(0);
+      await expect(page.getByText(/install it in step 1 first/)).toHaveCount(0);
+      expect(await page.evaluate(() => window.scrollY)).toBe(0);
+    } finally {
+      installed.proc.kill();
+      await page.close();
+    }
+  });
+}
 
 /** A HOME with xo installed as its quickstart leaves it (a venv whose xo and pip answer), and its PATH line. */
 function homeWithXo(logout = 'echo "fake xo: logged out"'): string {
@@ -372,7 +318,8 @@ for (const scheme of ["light", "dark"] as const) {
       const page = await browser.newPage({ viewport: { width, height: width === 390 ? 844 : 800 }, colorScheme: scheme });
       try {
         await page.goto(cli.url);
-        await expect(page.getByRole("radio", { name: "Install, update or remove qq and xo on this machine" })).toBeChecked();
+        // xo but no qq here: the page leads with installing qq.
+        await expect(page.getByText("Start here: qq is not on this machine")).toBeVisible();
         // Each tool starts at Keep (or Don't install), so Run has nothing to run.
         const qq = page.getByRole("radiogroup", { name: "What to do with qq" });
         const xo = page.getByRole("radiogroup", { name: "What to do with xo" });
@@ -388,6 +335,7 @@ for (const scheme of ["light", "dark"] as const) {
         const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
         expect(overflow).toBeLessThanOrEqual(0);
         mkdirSync(SHOTS, { recursive: true });
+        await page.evaluate(() => window.scrollTo(0, 0)); // the sticky steps bar sits at the top of a full-page shot
         await page.screenshot({ path: join(SHOTS, `machine-${width}-${scheme}.png`), fullPage: true });
 
         await page.getByRole("button", { name: "Run these 3 steps" }).click();
@@ -398,6 +346,7 @@ for (const scheme of ["light", "dark"] as const) {
         expect(existsSync(join(home, ".zshrc"))).toBe(false); // it held only xo's line
         // A fresh look: xo is now not installed, and the choice is back to Don't install.
         await expect(xo.getByRole("radio", { name: "Don't install" })).toBeChecked();
+        await page.evaluate(() => window.scrollTo(0, 0)); // the sticky steps bar sits at the top of a full-page shot
         await page.screenshot({ path: join(SHOTS, `machine-ran-${width}-${scheme}.png`), fullPage: true });
 
         await page.getByRole("button", { name: "Done: close qq-setup" }).click();
@@ -442,7 +391,7 @@ test("this machine: a ~/.xo that is not xo's is left alone, and the form opens w
     await page.goto(cli.url);
     await expect(page.getByText("Move ~/.xo away to install xo here; qq-setup leaves it alone.")).toBeVisible();
     await expect(page.getByRole("radiogroup", { name: "What to do with xo" })).toHaveCount(0);
-    await expect(page.getByRole("radio", { name: "Set up repos in an org I own" })).toBeDisabled();
+    await expect(page.getByRole("radiogroup", { name: "Your org" })).toHaveCount(0);
     await expect(page.getByText(/Needs GitHub, which is not ready/)).toBeVisible();
     // The page cannot ask for what the state does not offer.
     const seen = (await callApi(page, "/api/machine")).body.seen;
@@ -545,7 +494,8 @@ test("without a gh login, setting up repos is refused even when asked directly",
   const page = await browser.newPage();
   try {
     await page.goto(cli.url);
-    await expect(page.getByRole("radio", { name: "Set up repos in an org I own" })).toBeDisabled();
+    await expect(page.getByText(/Needs GitHub, which is not ready/)).toBeVisible();
+    await expect(page.getByRole("radiogroup", { name: "Your org" })).toHaveCount(0);
     const r = await callApi(page, "/api/answers", { org: "acme-labs", repos: ["web"], starter: null });
     expect(r.status).toBe(409);
     expect(r.body.error).toMatch(/^setting up repos needs GitHub: /);

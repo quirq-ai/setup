@@ -18,25 +18,23 @@ import { protectionWarnings, readProtection } from "./protection.mjs";
 import { openerBase, openFile, writeOpener } from "./opener.mjs";
 import { machine } from "./machine.mjs";
 import { startServer } from "./server.mjs";
-import { ACCESS, checkTools, installFor, MAC, NEEDS, toolsText, commandsFor } from "./tools.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
 // The form gives up after 30 minutes with no request from the page.
 const IDLE_MS = 30 * 60 * 1000;
 
-const HELP = `qq-setup: install, update or remove qq and xo on this machine, install qq to work on a repo that uses it, or set up quirq infra (qq) for your GitHub org.
+const HELP = `qq-setup: install, update or remove qq and xo on this machine, or set up quirq infra (qq) for your GitHub org.
 
   npx --allow-remote=root https://codeload.github.com/quirq-ai/setup/tar.gz/<commit> [--no-browser] [--port N]
 
 <commit> is the full id of the latest commit on https://github.com/quirq-ai/setup/commits/main.
 npm 12 runs a package from a tarball link only with --allow-remote=root.
 
-Checks your tools and gh login, then opens a form on 127.0.0.1 with three choices:
-  - this machine: install, update or remove qq and xo. The form shows what is installed and the
-    exact commands for what you pick, and runs them when you press Run;
-  - work on a repo that already uses qq: the commands that get it print here;
-  - set up repos in an org you own: pick the org and repos, and the plan prints here.
+Checks your tools and gh login, then opens a one-page form on 127.0.0.1 in two steps:
+  1. this machine: install, update or remove qq and xo. The form shows what is installed and the
+     exact commands for what you pick, and runs them when you press Run;
+  2. set up repos in an org you own: pick the org and repos, and the plan prints here.
 The form changes nothing on GitHub. Without a gh login it still opens, for this machine only.
 
   install        install, update or remove qq and xo in this terminal instead: it shows what is
@@ -105,7 +103,7 @@ async function main(argv = process.argv.slice(2)) {
 
   /** @type {Map<string, import("./facts.mjs").Repo[]>} */
   const listed = new Map();
-  /** @type {(v: import("./plan.mjs").Answers | { tools: string | null } | { done: true }) => void} */
+  /** @type {(v: import("./plan.mjs").Answers | { done: true }) => void} */
   let gotAnswers = () => {};
   const answered = new Promise((ok) => (gotAnswers = ok));
   let accepted = false;
@@ -148,8 +146,7 @@ async function main(argv = process.argv.slice(2)) {
       else if (Number.isInteger(Math.log10(refused))) console.log(`The link has now been tried again ${refused} times; all refused.`);
     },
     handlers: {
-      state: async () => (touch(), { version: pkg.version, readOnly: true, login, orgs, github, platform: process.platform,
-        tools: { install: installFor(process.platform), ...commandsFor(process.platform), needs: NEEDS, mac: MAC, access: ACCESS } }),
+      state: async () => (touch(), { version: pkg.version, readOnly: true, login, orgs, github, platform: process.platform }),
       repos: async (org) => {
         touch();
         const o = orgs.find((x) => x.login === org);
@@ -167,13 +164,6 @@ async function main(argv = process.argv.slice(2)) {
         if (body && typeof body === "object" && "mode" in body && body.mode === "done" && Object.keys(body).length === 1) {
           accepted = true;
           gotAnswers({ done: true });
-          return { ok: true };
-        }
-        if (body && typeof body === "object" && "mode" in body) {
-          const t = checkTools(body);
-          if (!t.ok) return t;
-          accepted = true;
-          gotAnswers({ tools: t.repo });
           return { ok: true };
         }
         if (github) return { ok: false, status: 409, error: `setting up repos needs GitHub: ${github}` };
@@ -258,13 +248,6 @@ async function main(argv = process.argv.slice(2)) {
 
   if ("done" in answers) {
     console.log("\nThe form is closed. Open a new terminal so PATH changes take effect.");
-    return 0;
-  }
-  if ("tools" in answers) {
-    console.log("");
-    for (const line of toolsText(answers.tools, process.platform)) console.log(line);
-    console.log(`\n${bold("Nothing was installed.")} qq-setup only printed the commands; run them yourself, or run qq-setup again`);
-    console.log("with install after the link (…/tar.gz/<commit> install) to have it check what is here and run them for you.");
     return 0;
   }
   const a = answers;

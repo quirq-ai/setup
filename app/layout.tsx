@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Set up qq",
-  description: "Pick the GitHub org and repos qq-setup should set up.",
+  description: "Install qq and xo on this machine, then pick the GitHub org and repos qq-setup should set up.",
   icons: { icon: "/brand/quirq/app-icon.svg" },
   robots: { index: false, follow: false },
 };
