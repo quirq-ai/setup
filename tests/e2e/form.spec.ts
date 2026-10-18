@@ -258,6 +258,18 @@ async function bottom(el: Locator): Promise<number> {
   return b.y + b.height;
 }
 
+/** Wait for a smooth scroll to end: scrollY the same over three samples 100 ms apart. */
+async function scrolled(page: Page) {
+  const samples: number[] = [];
+  await expect
+    .poll(async () => {
+      samples.push(await page.evaluate(() => window.scrollY));
+      const last = samples.slice(-3);
+      return last.length === 3 && last.every((y) => y === last[0]);
+    }, { intervals: [100] })
+    .toBe(true);
+}
+
 /** The page opens at step 1 and asks for qq first when qq is missing; with qq, at the top. */
 for (const width of [320, 390, 1280]) {
   test(`one page ${width}px: qq first, then the org, with a steps bar that moves between them`, async ({ browser }) => {
@@ -281,12 +293,14 @@ for (const width of [320, 390, 1280]) {
       await expect(step2).toBeInViewport();
       await expect(steps).toBeInViewport();
       // The bar wraps to two lines at 320 px: the step's heading still lands below it, not under it.
-      await expect.poll(async () => (await step2.boundingBox())!.y - (await bottom(steps))).toBeGreaterThanOrEqual(0);
+      await scrolled(page);
+      expect((await step2.boundingBox())!.y - (await bottom(steps))).toBeGreaterThanOrEqual(0);
       await expect(page.getByRole("radio", { name: /acme-labs/ })).toBeChecked();
       await steps.getByRole("button", { name: "1. This machine" }).click();
       await expect(step1).toBeInViewport();
       await expect(steps).toBeInViewport();
-      await expect.poll(async () => (await step1.boundingBox())!.y - (await bottom(steps))).toBeGreaterThanOrEqual(0);
+      await scrolled(page);
+      expect((await step1.boundingBox())!.y - (await bottom(steps))).toBeGreaterThanOrEqual(0);
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
       expect(overflow).toBeLessThanOrEqual(0);
     } finally {
