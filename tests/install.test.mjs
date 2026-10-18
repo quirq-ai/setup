@@ -1,14 +1,14 @@
 // @ts-check
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
 import {
-  BREW_PYTHON, cleanTmp, DEMO, defaultAction, describe, detect, main, pickPython, pinIn, planSteps, pythonOk,
-  QQ_REMOVE, QQ_REMOVE_TOOLS, removeLineCmd, SYNC_PIN, XO, XO_PATH_LINE, XO_PIN, XO_SPEC,
+  BREW_PYTHON, cleanTmp, DEMO, defaultAction, describe, detect, localWork, main, persistPython, pickPython, pinIn, planSteps, pythonOk,
+  QQ_REMOVE, QQ_REMOVE_TOOLS, read, removeLineCmd, SYNC_PIN, XO, XO_PATH_LINE, XO_PIN, XO_SPEC,
 } from "../cli/install.mjs";
 import { INSTALL, MAC_PYTHON } from "../cli/tools.mjs";
 
@@ -44,7 +44,8 @@ test("xo's commands follow the xo quickstart at the commit install.mjs names", (
   assert.ok(XO.install.cmd.includes(`"${XO_SPEC}"`) && XO.install.cmd.includes("-m venv --clear ~/.xo"));
   assert.equal(XO.update.cmd, update.replace("NEW_SHA", XO_PIN));
   assert.ok(XO.remove[0].cmd.startsWith(`( ~/.xo/bin/${logout} || {`), "by path: xo may not be on PATH in this shell");
-  assert.match(XO.remove[0].cmd, /rm -f "\$c\/xo\/credentials" "\$c\/xo\/services"/);
+  assert.equal(XO.remove[0].cmd, `( ~/.xo/bin/${logout} || { case "$XDG_CONFIG_HOME" in /*) c="$XDG_CONFIG_HOME" ;; *) c="$HOME/.config" ;; esac; ` +
+    'rm -f "$c/xo/credentials" "$c/xo/services" && echo "xo logout did not run; deleted $c/xo/credentials and $c/xo/services instead"; } )');
   assert.equal(XO.remove[1].cmd, rm);
   assert.equal(SYNC_PIN, /sync@([0-9a-f]{40})/.exec(INSTALL[1].cmd)?.[1]);
   assert.equal(BREW_PYTHON.cmd, "brew install python@3.13");
@@ -79,11 +80,15 @@ test("pickPython: QQ_PYTHON, else python3, else the newest python3.N, which qq m
     { cmd: "python3.13", version: "Python 3.13.16", ok: true, persist: true });
   assert.deepEqual(await pickPython({}, qq, runWith({ python3: "Python 3.9.6" })), { cmd: null, version: "Python 3.9.6", ok: false, persist: false });
   assert.equal((await pickPython({}, [3, 11, 0], runWith({ python3: "Python 3.11.2" }))).ok, true);
+  // The newest python3.N first.
+  assert.equal((await pickPython({}, qq, runWith({ python3: "Python 3.9.6", "python3.14": "Python 3.14.0", "python3.11": "Python 3.11.9" }))).cmd, "python3.14");
+  assert.throws(() => persistPython("python3; rm -rf ~"), /not a python3\.N name/);
+  assert.match(persistPython("python3.12").cmd, /export QQ_PYTHON=python3\.12/);
 });
 
 /** @type {import("../cli/install.mjs").State} */
 const none = { qq: { installed: false, broken: false, commit: null, latest: null, syncPin: null, onPath: false, behind: [], localWork: null },
-  xo: { installed: false, broken: false, pin: null, onPath: false, behind: [], note: null } };
+  xo: { installed: false, broken: false, foreign: false, pin: null, onPath: false, behind: [], note: null } };
 const here = { qq: { ...none.qq, installed: true, onPath: true }, xo: { ...none.xo, installed: true, onPath: true, pin: XO_PIN } };
 const py = { cmd: "python3", version: "Python 3.13.16", ok: true, persist: false };
 const linux = { python: py, platform: "linux", git: true };
@@ -97,6 +102,8 @@ test("planSteps: install, update and remove, in order", () => {
   const withDemo = planSteps({ qq: "remove", xo: "keep" }, here, { ...linux, demo: ["qq-try"] }).steps.map((s) => s.cmd);
   assert.deepEqual(withDemo, [QQ_REMOVE_TOOLS, "rm -rf ~/qq-try", cleanTmp(QQ_REMOVE[1])]);
   assert.deepEqual(planSteps({ qq: "keep", xo: "keep" }, here, linux).steps, []);
+  // Only the PATH line: no reinstall, no re-clone.
+  assert.deepEqual(planSteps({ qq: "path", xo: "path" }, here, { ...linux, git: false }).steps, [INSTALL[2], XO.path]);
   assert.match(planSteps({ qq: "install", xo: "keep" }, none, { ...linux, platform: "darwin", git: false }).stop ?? "", /git is needed.*xcode-select --install/);
   // Removing needs neither git nor Python.
   assert.equal(planSteps({ qq: "remove", xo: "remove" }, here, { python: { ...py, ok: false }, platform: "linux", git: false }).stop, null);
@@ -129,21 +136,37 @@ test("defaultAction: install what is missing or broken, update what is behind, k
   assert.equal(defaultAction({ ...t, installed: false, broken: true }, { remove: true }), "remove");
   assert.equal(defaultAction({ ...t, installed: false }, { remove: true }), "keep");
   for (const flags of [{}, { update: true }, { remove: true }]) assert.equal(defaultAction({ ...t, behind: ["x"], localWork: "1 local commit" }, flags), "keep");
+  // Only the PATH line missing: just that line, local work or not; --update still updates.
+  assert.equal(defaultAction({ ...t, behind: ["not on PATH"] }, {}), "path");
+  assert.equal(defaultAction({ ...t, behind: ["not on PATH"], localWork: "1 stash" }, {}), "path");
+  assert.equal(defaultAction({ ...t, behind: ["not on PATH"] }, { update: true }), "update");
+  assert.equal(defaultAction({ ...t, behind: ["not on PATH", "qqsync is not installed"] }, {}), "update");
+  // A ~/.xo that is not xo's is never touched.
+  for (const flags of [{}, { update: true }, { remove: true }]) assert.equal(defaultAction({ ...t, installed: false, foreign: true }, flags), "keep");
 });
 
 /** A home with qq, qqsync and xo as an install leaves them. */
 function fakeHome() {
   const home = mkdtempSync(join(tmpdir(), "qq-setup-home-"));
   for (const d of ["qq-tools/depot/bin", "qq-tools/qqsync/bin", "qq-tools/bin", ".xo/bin"]) mkdirSync(join(home, d), { recursive: true });
-  for (const f of ["qq-tools/depot/bin/qq", "qq-tools/qqsync/bin/pip", "qq-tools/bin/qq", ".xo/bin/xo", ".xo/bin/pip"]) writeFileSync(join(home, f), "");
+  for (const f of ["qq-tools/depot/bin/qq", "qq-tools/qqsync/bin/pip", "qq-tools/bin/qq", ".xo/bin/xo", ".xo/bin/pip", ".xo/pyvenv.cfg"]) writeFileSync(join(home, f), "");
   return home;
 }
 
-/** run() for detect: git answers per subcommand, pip freeze per venv, xo --version. @returns {any} */
-function fakeRun({ head = "a".repeat(40), status = "", ahead = "0", xoPin = XO_PIN, xoRuns = true } = {}) {
+/**
+ * run() for detect: git answers per subcommand, pip freeze per venv, xo --version.
+ * @param {{ head?: string, status?: string, ahead?: string, stash?: string, xoPin?: string, xoRuns?: boolean | number }} [o]
+ *   xoRuns: a number is how many `xo --version` calls fail before one works
+ * @returns {any}
+ */
+function fakeRun({ head = "a".repeat(40), status = "", ahead = "0", stash = "", xoPin = XO_PIN, xoRuns = true } = {}) {
+  let xoFails = typeof xoRuns === "number" ? xoRuns : 0;
   return async (/** @type {string} */ file, /** @type {string[]} */ args) => {
-    if (file === "git") return args.includes("rev-parse") ? `${head}\n` : args.includes("status") ? status : args.includes("rev-list") ? `${ahead}\n` : "git version 2.50";
-    if (file.endsWith("/xo")) return xoRuns ? "xo 0.1.0\n" : null;
+    if (file === "git") {
+      return args.includes("rev-parse") ? `${head}\n` : args.includes("status") ? status : args.includes("rev-list") ? `${ahead}\n`
+        : args.includes("stash") ? stash : args.includes("worktree") ? `worktree ${args[1]}\nHEAD ${head}\nbranch refs/heads/main\n\n` : "git version 2.50";
+    }
+    if (file.endsWith("/xo")) return xoRuns === false || xoFails-- > 0 ? null : "xo 0.1.0\n";
     if (file.includes("qqsync")) return `qqsync @ git+https://github.com/quirq-ai/sync@${SYNC_PIN}\n`;
     if (file.endsWith("/pip")) return `quirq-xo @ git+https://github.com/quirq-ai/xo@${xoPin}\n`;
     return file === "python3" ? "Python 3.13.16" : null;
@@ -158,25 +181,50 @@ test("detect reads what a previous install left", async () => {
   const s = await detect({ home, latest: "b".repeat(40), run: fakeRun({ xoPin: old }) });
   assert.deepEqual(s.qq, { installed: true, broken: false, commit: "a".repeat(40), latest: "b".repeat(40), syncPin: SYNC_PIN, onPath: true,
     behind: ["qq aaaaaaa is behind bbbbbbb"], localWork: null });
-  // An xo commit other than the pin may be newer: a note, not "behind".
+  // An xo commit other than the pin may be newer: a note, not "behind". Missing only its PATH line,
+  // it gets just that line, never a reinstall at the pin.
   assert.deepEqual(s.xo.behind, ["not on PATH"]);
   assert.match(s.xo.note ?? "", /xo is at 1111111, not setup's pin .{7}; updating would put it at/);
   const lines = describe(s);
   assert.match(lines[0], /qq {2}installed at aaaaaaa, newest is bbbbbbb; qqsync at .{7}; on PATH: update available/);
   assert.match(lines[1], /xo {2}installed at 1111111; not on PATH: not at setup's pin/);
-  assert.equal(defaultAction(s.xo, {}), "update", "only because it is not on PATH");
-  writeFileSync(join(home, ".zshrc"), `${XO_PATH_LINE}\nexport PATH=$HOME/qq-tools/bin:$PATH\n`);
+  assert.equal(defaultAction(s.xo, {}), "path");
+  assert.deepEqual(planSteps({ qq: "keep", xo: defaultAction(s.xo, {}) }, s, linux).steps, [XO.path]);
+  // xo's line written another way counts, as qq's does.
+  writeFileSync(join(home, ".zshrc"), `export PATH=$HOME/.xo/bin:$PATH\nexport PATH=$HOME/qq-tools/bin:$PATH\n`);
   assert.equal(defaultAction((await detect({ home, latest: "b".repeat(40), run: fakeRun({ xoPin: old }) })).xo, {}), "keep");
+  // No qq line: qq is not on PATH, and gets just its PATH step.
+  writeFileSync(join(home, ".zshrc"), `${XO_PATH_LINE}\n`);
+  const noQqLine = await detect({ home, latest: "a".repeat(40), run: fakeRun() });
+  assert.equal(noQqLine.qq.onPath, false);
+  assert.deepEqual(noQqLine.qq.behind, ["not on PATH"]);
+  assert.match(describe(noQqLine)[0], /not on PATH: PATH line missing/);
+  assert.equal(defaultAction(noQqLine.qq, {}), "path");
+  writeFileSync(join(home, ".zshrc"), `${XO_PATH_LINE}\nexport PATH=$HOME/qq-tools/bin:$PATH\n`);
 
-  const work = await detect({ home, latest: "b".repeat(40), run: fakeRun({ status: " M bin/qq\n?? MY-NOTES.txt\n", ahead: "1" }) });
-  assert.equal(work.qq.localWork, "uncommitted files and 1 local commit");
+  const work = await detect({ home, latest: "b".repeat(40), run: fakeRun({ status: " M bin/qq\n?? MY-NOTES.txt\n", ahead: "1", stash: "stash@{0}: WIP\n" }) });
+  assert.equal(work.qq.localWork, "uncommitted or untracked files and 1 commit on no remote branch and 1 stash");
   assert.deepEqual(work.qq.behind, [], "local work is not behind");
-  assert.match(describe(work)[0], /with local work \(uncommitted files and 1 local commit\)/);
+  assert.match(describe(work)[0], /with local work \(uncommitted or untracked files and 1 commit/);
+  // When git cannot answer, that counts as work: qq is kept.
+  const unknown = await detect({ home, latest: "b".repeat(40), run: async (/** @type {string} */ f, /** @type {string[]} */ a) =>
+    (f === "git" && a.includes("rev-list") ? null : fakeRun()(f, a)) });
+  assert.equal(unknown.qq.localWork, "files git could not check");
+  assert.equal(defaultAction(unknown.qq, { update: true }), "keep");
+
+  // xo --version failing once is retried before xo is called broken.
+  assert.equal((await detect({ home, latest: null, run: fakeRun({ xoRuns: 1 }) })).xo.installed, true);
 
   const broken = await detect({ home, latest: null, run: fakeRun({ xoRuns: false }) });
   assert.equal(broken.xo.installed, false);
   assert.equal(broken.xo.broken, true);
   assert.match(describe(broken)[1], /not working/);
+  // ~/.xo without pyvenv.cfg is not xo's: neither installed nor broken, and left alone.
+  const other = mkdtempSync(join(tmpdir(), "qq-setup-other-"));
+  mkdirSync(join(other, ".xo", "config"), { recursive: true });
+  const foreign = await detect({ home: other, latest: null, run: fakeRun({ xoRuns: false }) });
+  assert.deepEqual([foreign.xo.installed, foreign.xo.broken, foreign.xo.foreign], [false, false, true]);
+  assert.match(describe(foreign)[1], /is not an xo install \(no pyvenv\.cfg\); it is left alone/);
   assert.deepEqual(describe(await detect({ home: mkdtempSync(join(tmpdir(), "qq-setup-empty-")), run: fakeRun() })),
     ["  qq  not installed", "  xo  not installed"]);
 });
@@ -245,7 +293,10 @@ test("main: --remove --yes keeps local work and the guide's demo folders; asking
   // Local work: --remove and --update keep qq, and say why.
   const work = await drive(["--remove", "--yes", "--only", "qq"], { home, tty: false, run: fakeRun({ ahead: "2" }) });
   assert.deepEqual(work.steps, []);
-  assert.ok(work.out.some((l) => /has 2 local commits; updating or removing qq deletes them/.test(l)));
+  assert.ok(work.out.some((l) => /has 2 commits on no remote branch; reinstalling, updating or removing qq deletes them/.test(l)));
+  // Plain --yes with qq behind and local work: kept too.
+  const plain = await drive(["--yes", "--only", "qq"], { home, tty: false, run: fakeRun({ head: "c".repeat(40), stash: "stash@{0}: x\n" }) });
+  assert.deepEqual(plain.steps, []);
 });
 
 test("main: a broken xo is offered a reinstall, and --remove removes it", async () => {
@@ -255,6 +306,82 @@ test("main: a broken xo is offered a reinstall, and --remove removes it", async 
   assert.deepEqual(r.steps, [XO.install.cmd, XO.path.cmd]);
   const rm = await drive(["--only", "xo", "--remove", "--yes"], { home, tty: false, run: fakeRun({ xoRuns: false }) });
   assert.deepEqual(rm.steps, XO.remove.map((s) => s.cmd));
+});
+
+test("main: a ~/.xo that is not xo's is never installed over or removed", async () => {
+  const home = mkdtempSync(join(tmpdir(), "qq-setup-other-"));
+  mkdirSync(join(home, ".xo", "config"), { recursive: true });
+  for (const argv of [["--yes"], ["--yes", "--update"], ["--yes", "--remove"]]) {
+    const r = await drive([...argv, "--only", "xo"], { home, tty: false, run: fakeRun({ xoRuns: false }) });
+    assert.deepEqual(r.steps, [], argv.join(" "));
+  }
+  const asked = await drive(["--only", "xo"], { home, run: fakeRun({ xoRuns: false }) });
+  assert.deepEqual(asked.asked, []);
+  assert.ok(asked.out.some((l) => /~\/\.xo is not an xo install, so it is left alone/.test(l)));
+});
+
+test("main: an installed tool missing only its PATH line is asked about adding it, and Enter adds just that", async () => {
+  const home = fakeHome();
+  writeFileSync(join(home, ".zshrc"), `export PATH="$HOME/qq-tools/bin:$PATH"\n`);
+  const r = await drive(["--only", "xo"], { home, answers: ["", "y"], run: fakeRun({ xoPin: "1".repeat(40) }) });
+  assert.match(r.asked[0], /xo is installed but not on PATH\. Add the PATH line, update, remove or keep it\? \[A\/u\/r\/k\]/);
+  assert.deepEqual(r.steps, [XO.path.cmd]);
+});
+
+test("main: removing says when a PATH line written another way is left", async () => {
+  const home = fakeHome();
+  writeFileSync(join(home, ".zshrc"), `export PATH=$HOME/qq-tools/bin:$PATH\nexport PATH=$HOME/.xo/bin:$PATH\n`);
+  const r = await drive(["--remove", "--yes"], { home, tty: false });
+  assert.ok(r.out.includes("~/.zshrc still has a line naming qq-tools/bin; delete it yourself."));
+  assert.ok(r.out.includes("~/.zshrc still has a line naming .xo/bin; delete it yourself."));
+});
+
+test("main: on a Mac with no new enough Python, brew's python3.13 is what the steps get", async () => {
+  const home = mkdtempSync(join(tmpdir(), "qq-setup-mac-"));
+  const r = await drive(["--yes", "--only", "qq"], { home, platform: "darwin", tty: false,
+    run: async (/** @type {string} */ f) => (f === "python3" ? "Python 3.9.6" : f === "git" ? "git version 2.50" : null) });
+  assert.equal(r.code, 0);
+  assert.equal(r.steps[0], MAC_PYTHON.cmd);
+  assert.ok(r.envs.every((e) => e.QQ_PYTHON === "python3.13"));
+});
+
+/** A clone of a scratch remote, as qq's install leaves one. @returns {{ depot: string, git: (...a: string[]) => string }} */
+function clone() {
+  const root = mkdtempSync(join(tmpdir(), "qq-setup-git-"));
+  const id = ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "init.defaultBranch=main", "-c", "commit.gpgsign=false"];
+  const at = (/** @type {string} */ dir) => (/** @type {string[]} */ ...a) => execFileSync("git", ["-C", dir, ...id, ...a], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  execFileSync("git", [...id, "init", "-q", join(root, "src")]);
+  at(join(root, "src"))("commit", "-q", "--allow-empty", "-m", "one");
+  execFileSync("git", [...id, "clone", "-q", join(root, "src"), join(root, "depot")]);
+  at(join(root, "src"))("commit", "-q", "--allow-empty", "-m", "two");
+  return { depot: join(root, "depot"), git: at(join(root, "depot")) };
+}
+
+test("localWork, with real git: every way a checkout can hold work, and none on a fresh clone", async () => {
+  assert.deepEqual(await localWork(clone().depot, read), []);
+  const cases = {
+    "a new branch with a commit": (/** @type {any} */ g) => (g("checkout", "-q", "-b", "mywork"), g("commit", "-q", "--allow-empty", "-m", "w")),
+    "a detached HEAD with a commit": (/** @type {any} */ g) => (g("checkout", "-q", "--detach"), g("commit", "-q", "--allow-empty", "-m", "w")),
+    "a commit left only in the reflog": (/** @type {any} */ g) => (g("commit", "-q", "--allow-empty", "-m", "w"), g("reset", "-q", "--hard", "HEAD~1")),
+    "a commit on another branch": (/** @type {any} */ g) => (g("checkout", "-q", "-b", "feature"), g("commit", "-q", "--allow-empty", "-m", "w"), g("checkout", "-q", "main")),
+    "a local tag": (/** @type {any} */ g) => (g("checkout", "-q", "--detach"), g("commit", "-q", "--allow-empty", "-m", "w"), g("tag", "t"), g("checkout", "-q", "main")),
+  };
+  for (const [name, make] of Object.entries(cases)) {
+    const { depot, git } = clone();
+    make(git);
+    assert.deepEqual(await localWork(depot, read), ["1 commit on no remote branch"], name);
+  }
+  const { depot, git } = clone();
+  writeFileSync(join(depot, "notes.txt"), "mine");
+  assert.deepEqual(await localWork(depot, read), ["uncommitted or untracked files"], "an untracked file");
+  git("stash", "-q", "-u");
+  const stashed = await localWork(depot, read);
+  assert.ok(stashed.includes("1 stash"), `a stash: ${stashed}`);
+  const wt = clone();
+  wt.git("worktree", "add", "-q", "--detach", join(wt.depot, "..", "wt"));
+  assert.deepEqual(await localWork(wt.depot, read), ["1 other worktree"]);
+  // Not a checkout git can read: kept.
+  assert.deepEqual(await localWork(mkdtempSync(join(tmpdir(), "qq-setup-nogit-")), read), ["files git could not check"]);
 });
 
 test("main: options and HOME", async () => {

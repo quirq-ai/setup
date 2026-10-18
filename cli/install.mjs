@@ -55,6 +55,7 @@ export function removeLineCmd(line, label) {
 }
 
 /** @typedef {{ what: string, cmd: string }} Step */
+const NOT_ON_PATH = "not on PATH";
 
 export const XO = {
   /** The quickstart's install, as the qq guide's steps are written: in ( … ), with the Python picked.
@@ -87,7 +88,7 @@ export const SYNC_PIN = /** @type {string} */ (/sync@([0-9a-f]{40})/.exec(INSTAL
  * @typedef {{ installed: boolean, broken: boolean, commit: string | null, latest: string | null,
  *   syncPin: string | null, onPath: boolean, behind: string[], localWork: string | null }} QqState
  * @typedef {{ installed: boolean, broken: boolean, pin: string | null, onPath: boolean, behind: string[],
- *   note: string | null }} XoState
+ *   note: string | null, foreign: boolean }} XoState
  * @typedef {{ qq: QqState, xo: XoState }} State
  * @typedef {{ cmd: string | null, version: string | null, ok: boolean, persist: boolean }} PythonPick
  * @typedef {(file: string, args: string[], env?: NodeJS.ProcessEnv) => Promise<string | null>} Read
@@ -118,25 +119,48 @@ export function pinIn(freeze, pkg) {
 }
 
 /**
- * Look at what is installed. Reads only: files under home, `git status`, `rev-parse` and `rev-list` in
- * qq's checkout, `pip freeze` in the two venvs, `xo --version` and, unless `latest` is given,
- * `git ls-remote` for qq's newest commit.
+ * What reinstalling or removing qq's checkout would lose, as phrases; empty when there is nothing.
+ * It counts files git status shows (changed, staged or untracked; not ones .gitignore names), commits
+ * no remote branch has (on any branch or tag, a detached HEAD, or only in a reflog, as after a reset),
+ * stashes and other worktrees. When git cannot tell, that is work too, so qq is kept.
+ * @param {string} depot @param {Read} run @returns {Promise<string[]>}
+ */
+export async function localWork(depot, run) {
+  const git = (/** @type {string[]} */ ...args) => run("git", ["-C", depot, ...args]);
+  const status = await git("status", "--porcelain");
+  const commits = await git("rev-list", "--count", "HEAD", "--branches", "--tags", "--reflog", "--not", "--remotes");
+  const stashes = await git("stash", "list");
+  const trees = await git("worktree", "list", "--porcelain");
+  if (status === null || commits === null || stashes === null || trees === null || !/^\d+$/.test(commits.trim())) {
+    return ["files git could not check"];
+  }
+  /** @param {number} n @param {string} one */
+  const count = (n, one) => `${n} ${one}${n === 1 ? "" : one.endsWith("h") ? "es" : "s"}`;
+  /** @type {string[]} */
+  const work = [];
+  if (status.trim()) work.push("uncommitted or untracked files");
+  const ahead = Number(commits.trim());
+  if (ahead) work.push(`${count(ahead, "commit")} on no remote branch`);
+  const stash = stashes.split("\n").filter(Boolean).length;
+  if (stash) work.push(count(stash, "stash"));
+  const others = trees.split("\n").filter((l) => l.startsWith("worktree ")).length - 1;
+  if (others > 0) work.push(count(others, "other worktree"));
+  return work;
+}
+
+/**
+ * Look at what is installed. Reads only: files under home, `git status`, `rev-parse`, `rev-list`,
+ * `stash list` and `worktree list` in qq's checkout, `pip freeze` in the two venvs, `xo --version`
+ * and, unless `latest` is given, `git ls-remote` for qq's newest commit.
  * @param {{ home: string, latest?: string | null, run?: Read }} o
  * @returns {Promise<State>}
  */
 export async function detect({ home, latest, run = read }) {
   const depot = join(home, "qq-tools", "depot");
   const qqHere = existsSync(join(depot, "bin", "qq"));
-  const git = (/** @type {string[]} */ ...args) => run("git", ["-C", depot, ...args]);
-  const commit = qqHere ? (await git("rev-parse", "HEAD"))?.trim() || null : null;
-  /** @type {string[]} */
-  const work = [];
-  if (qqHere) {
-    if ((await git("status", "--porcelain"))?.trim()) work.push("uncommitted files");
-    const ahead = Number((await git("rev-list", "--count", "@{u}..HEAD"))?.trim() || 0);
-    if (ahead > 0) work.push(`${ahead} local commit${ahead === 1 ? "" : "s"}`);
-    if (latest === undefined) latest = (await run("git", ["ls-remote", "https://github.com/quirq-ai/qq", "HEAD"]))?.split(/\s/)[0] || null;
-  }
+  const commit = qqHere ? (await run("git", ["-C", depot, "rev-parse", "HEAD"]))?.trim() || null : null;
+  const work = existsSync(depot) ? await localWork(depot, run) : [];
+  if (qqHere && latest === undefined) latest = (await run("git", ["ls-remote", "https://github.com/quirq-ai/qq", "HEAD"]))?.split(/\s/)[0] || null;
   const syncPip = join(home, "qq-tools", "qqsync", "bin", "pip");
   const syncPin = existsSync(syncPip) ? pinIn(await run(syncPip, ["freeze", "--disable-pip-version-check"]), "qqsync") : null;
   // The same test as the guide's PATH step's guard (grep 'qq-tools/bin:'), so a line it accepts counts.
@@ -146,14 +170,19 @@ export async function detect({ home, latest, run = read }) {
   if (qqHere) {
     if (!work.length && latest && commit && latest !== commit) qqBehind.push(`qq ${commit.slice(0, 7)} is behind ${latest.slice(0, 7)}`);
     if (syncPin !== SYNC_PIN) qqBehind.push(syncPin ? `qqsync is at ${syncPin.slice(0, 7)}, not ${SYNC_PIN.slice(0, 7)}` : "qqsync is not installed");
-    if (!qqOnPath) qqBehind.push("not on PATH");
+    if (!qqOnPath) qqBehind.push(NOT_ON_PATH);
   }
 
   const xoDir = existsSync(join(home, ".xo"));
+  // Only a venv (pyvenv.cfg) is xo's: any other ~/.xo is someone else's folder and is never touched.
+  const xoVenv = existsSync(join(home, ".xo", "pyvenv.cfg"));
   const xoBin = join(home, ".xo", "bin", "xo");
-  const xoHere = existsSync(xoBin) && (await run(xoBin, ["--version"])) !== null;
+  // Asked twice before calling it broken, so one slow start never turns into a reinstall.
+  const xoRuns = async () => (await run(xoBin, ["--version"])) !== null || (await run(xoBin, ["--version"])) !== null;
+  const xoHere = xoVenv && existsSync(xoBin) && (await xoRuns());
   const pin = xoHere ? pinIn(await run(join(home, ".xo", "bin", "pip"), ["freeze", "--disable-pip-version-check"]), "quirq-xo") : null;
-  const xoOnPath = rcWith(home, (l) => l === XO_PATH_LINE).length > 0;
+  // Any line naming .xo/bin:, as qq's check takes any line naming qq-tools/bin:.
+  const xoOnPath = rcWith(home, (l) => l.includes(".xo/bin:")).length > 0;
   // A commit other than the pin may be newer (the XO team hands out commits): say so, never call it behind.
   const note = xoHere && pin !== XO_PIN
     ? `xo is ${pin ? `at ${pin.slice(0, 7)}` : "at a commit pip does not name"}, not setup's pin ${XO_PIN.slice(0, 7)}; updating would put it at ${XO_PIN.slice(0, 7)}`
@@ -161,7 +190,7 @@ export async function detect({ home, latest, run = read }) {
   return {
     qq: { installed: qqHere, broken: !qqHere && existsSync(depot), commit, latest: latest ?? null, syncPin, onPath: qqOnPath,
       behind: qqBehind, localWork: work.length ? work.join(" and ") : null },
-    xo: { installed: xoHere, broken: xoDir && !xoHere, pin, onPath: xoOnPath, behind: xoHere && !xoOnPath ? ["not on PATH"] : [], note },
+    xo: { installed: xoHere, broken: xoVenv && !xoHere, foreign: xoDir && !xoVenv, pin, onPath: xoOnPath, behind: xoHere && !xoOnPath ? [NOT_ON_PATH] : [], note },
   };
 }
 
@@ -201,7 +230,7 @@ export function persistPython(py) {
     cmd: `( ${PICK_RC}; { grep -qs 'QQ_PYTHON=' "$rc" || printf '\\nexport QQ_PYTHON=${py}\\n' >> "$rc"; } && echo "QQ_PYTHON is set in $rc" )` };
 }
 
-/** @typedef {"install" | "update" | "remove" | "keep"} Action */
+/** @typedef {"install" | "update" | "remove" | "keep" | "path"} Action  path: only add the PATH line */
 
 /** @param {{ qq: Action, xo: Action }} a */
 const usesQq = (a) => a.qq === "install" || a.qq === "update";
@@ -239,6 +268,7 @@ export function planSteps(actions, state, { python, platform, git, demo = [] }) 
     steps.push(persistPython(python.cmd));
   }
   if (qq) steps.push(...INSTALL);
+  if (actions.qq === "path") steps.push(/** @type {Step} */ (INSTALL[2]));
   if (actions.qq === "remove") {
     steps.push({ what: "Remove qq, qqsync and qq's cache (~/qq-tools, ~/.cache/qq)", cmd: QQ_REMOVE_TOOLS });
     for (const d of demo) steps.push({ what: `Delete ~/${d}, the qq guide's demo folder`, cmd: `rm -rf ~/${d}` });
@@ -247,9 +277,13 @@ export function planSteps(actions, state, { python, platform, git, demo = [] }) 
   if (xo) steps.push(XO.install);
   else if (actions.xo === "update") steps.push(XO.update);
   if ((xo || actions.xo === "update") && !state.xo.onPath) steps.push(XO.path);
+  if (actions.xo === "path") steps.push(XO.path);
   if (actions.xo === "remove") steps.push(...XO.remove);
   return { steps, stop: null };
 }
+
+/** The tool's only problem is its missing PATH line. @param {{ behind: string[] }} t */
+export const pathOnly = (t) => t.behind.length === 1 && t.behind[0] === NOT_ON_PATH;
 
 /** One line per tool for the terminal. @param {State} s @returns {string[]} */
 export function describe(s) {
@@ -259,23 +293,28 @@ export function describe(s) {
         (s.qq.localWork ? `, with local work (${s.qq.localWork})`
           : s.qq.latest ? (s.qq.latest === s.qq.commit ? " (the newest)" : `, newest is ${s.qq.latest.slice(0, 7)}`) : " (could not check the newest)") +
         `; qqsync ${s.qq.syncPin ? `at ${s.qq.syncPin.slice(0, 7)}` : "missing"}` +
-        `; ${s.qq.onPath ? "on PATH" : "not on PATH"}` + (s.qq.behind.length ? ": update available" : s.qq.localWork ? "" : ": up to date");
-  const xo = s.xo.broken ? "not working: ~/.xo is there but its xo does not run"
+        `; ${s.qq.onPath ? "on PATH" : "not on PATH"}` + (pathOnly(s.qq) ? ": PATH line missing" : s.qq.behind.length ? ": update available" : s.qq.localWork ? "" : ": up to date");
+  const xo = s.xo.foreign ? "~/.xo is there but is not an xo install (no pyvenv.cfg); it is left alone"
+    : s.xo.broken ? "not working: ~/.xo is xo's venv but its xo does not run"
     : !s.xo.installed ? "not installed"
       : `installed at ${s.xo.pin?.slice(0, 7) ?? "an unknown commit"}; ${s.xo.onPath ? "on PATH" : "not on PATH"}` +
-        (s.xo.pin !== XO_PIN ? `: not at setup's pin (${XO_PIN.slice(0, 7)})` : s.xo.behind.length ? ": update available" : ": up to date");
+        (s.xo.pin !== XO_PIN ? `: not at setup's pin (${XO_PIN.slice(0, 7)})` : pathOnly(s.xo) ? ": PATH line missing" : s.xo.behind.length ? ": update available" : ": up to date");
   return [`  qq  ${qq}`, `  xo  ${xo}`];
 }
 
 /**
  * The action for one tool with no question asked: --remove removes, otherwise an absent or broken tool
- * is installed and one that is behind is updated (also with --update, which reruns an up-to-date one).
- * A qq checkout with local work is kept: updating or removing it would delete that work.
- * @param {{ installed: boolean, broken: boolean, behind: string[], localWork?: string | null }} t
+ * is installed, one that is only missing its PATH line gets just that line, and one that is behind is
+ * updated (also with --update, which reruns an up-to-date one). A qq checkout with local work is kept:
+ * updating or removing it would delete that work. A ~/.xo that is not xo's is never touched.
+ * @param {{ installed: boolean, broken: boolean, behind: string[], localWork?: string | null, foreign?: boolean }} t
  * @param {{ remove?: boolean, update?: boolean }} flags
  * @returns {Action}
  */
 export function defaultAction(t, flags) {
+  if (t.foreign) return "keep";
+  // Adding the PATH line touches no checkout, so it is the default even with local work.
+  if (!flags.remove && !flags.update && t.installed && pathOnly(t)) return "path";
   if (t.localWork) return "keep";
   if (flags.remove) return t.installed || t.broken ? "remove" : "keep";
   if (!t.installed) return "install";
@@ -301,8 +340,10 @@ keep what is there), prints the exact commands, and runs them after you say yes.
   --only qq|xo   only this tool (qq includes qqsync); default both
   --update       update what is installed (rerun its install), install what is missing
   --remove       remove the tools instead
-  --yes          no questions: do the default (or --update / --remove) and run it. It never deletes
-                 a qq checkout with local work or the qq guide's demo folders
+  --yes          no questions: do the default (or --update / --remove) and run it. It keeps a qq
+                 checkout with local work git can see (files git status lists, commits on no remote
+                 branch, stashes, other worktrees) or that git cannot check, keeps the qq guide's
+                 demo folders, and never touches a ~/.xo that is not a venv
   --dry-run      print the commands and run nothing
   --help         this text`;
 
@@ -384,14 +425,24 @@ export async function main(argv, io = realIo()) {
       const t = state[tool];
       const work = tool === "qq" ? state.qq.localWork : null;
       const note = tool === "xo" ? state.xo.note : null;
-      if (work) out(`  ${tool}: ~/qq-tools/depot has ${work}; updating or removing qq deletes them.`);
+      if (tool === "xo" && state.xo.foreign) {
+        out("  xo: ~/.xo is not an xo install, so it is left alone. Move it away first to install xo there.");
+        continue;
+      }
+      if (work) out(`  ${tool}: ~/qq-tools/depot has ${work}; reinstalling, updating or removing qq deletes them.`);
       if (note) out(`  ${tool}: ${note}.`);
       if (!prompt || f.update || f.remove) {
         actions[tool] = defaultAction(t, f);
         if (work && (f.update || f.remove)) out(`  ${tool}: kept. Run without --${f.update ? "update" : "remove"} to choose.`);
       } else if (t.broken) {
-        const a = await choose(prompt, `${tool} is there but not working. Reinstall, delete or keep it? [R/d/k] `, ["reinstall", "delete", "keep"]);
+        // With local work, Enter keeps it.
+        const a = work
+          ? await choose(prompt, `${tool} is there but not working. Keep, reinstall or delete it? [K/r/d] `, ["keep", "reinstall", "delete"])
+          : await choose(prompt, `${tool} is there but not working. Reinstall, delete or keep it? [R/d/k] `, ["reinstall", "delete", "keep"]);
         actions[tool] = a === "reinstall" ? "install" : a === "delete" ? "remove" : "keep";
+      } else if (t.installed && pathOnly(t)) {
+        const a = await choose(prompt, `${tool} is installed but not on PATH. Add the PATH line, update, remove or keep it? [A/u/r/k] `, ["add", "update", "remove", "keep"]);
+        actions[tool] = a === "add" ? "path" : /** @type {Action} */ (a);
       } else if (!t.installed) {
         actions[tool] = (await choose(prompt, `Install ${tool}? [Y/n] `, ["yes", "no"])) === "yes" ? "install" : "keep";
       } else if (t.behind.length && !work) {
@@ -441,6 +492,11 @@ export async function main(argv, io = realIo()) {
       for (const rc of rcWith(home, (l) => /^\s*export QQ_PYTHON=/.test(l))) {
         out(`~/${rc} still sets QQ_PYTHON; delete that line unless something else uses that Python.`);
       }
+    }
+    // The remove steps delete only the exact lines the install writes; say where another form is left.
+    for (const [tool, dir] of /** @type {const} */ ([["qq", "qq-tools/bin:"], ["xo", ".xo/bin:"]])) {
+      if (actions[tool] !== "remove") continue;
+      for (const rc of rcWith(home, (l) => l.includes(dir))) out(`~/${rc} still has a line naming ${dir.slice(0, -1)}; delete it yourself.`);
     }
     return 0;
   } finally {

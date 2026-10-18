@@ -75,18 +75,24 @@ files only in your home directory, except that on a Mac with no new enough Pytho
 `brew install python@3.13`, which writes to Homebrew's folder.
 
 - **qq** (with qqsync) installs with the [qq guide](https://docs.quirq.dev/docs/install)'s three commands.
-  Updating reruns them, so it is offered only when the checkout has no local work: with uncommitted
-  files or local commits in `~/qq-tools/depot`, it keeps qq unless you choose otherwise, and `--yes`
-  always keeps it. Removing deletes `~/qq-tools`, `~/.cache/qq` and the `PATH` line, as the guide's
-  "Remove everything" does. That command also deletes the guide's demo folders, `~/qq-try` and
-  `~/qq-ci-venv`, where your own clones may be: this asks about each by name, and `--yes` keeps them.
-  It leaves a `QQ_PYTHON` line in your startup file and says so.
+  Updating reruns them, which deletes and re-clones `~/qq-tools/depot`, so qq is kept when the checkout
+  has local work, unless you choose otherwise; `--yes` always keeps it. Local work is what git can
+  show: files `git status` lists (changed, staged or untracked, but not ones `.gitignore` names), commits
+  no remote branch has (on any branch or tag, on a detached HEAD, or only in a reflog, as after a
+  reset), stashes, and other worktrees. When git cannot check, qq is kept too. When only the `PATH`
+  line is missing, it adds just that line. Removing deletes `~/qq-tools`, `~/.cache/qq` and the
+  `PATH` line, as the guide's "Remove everything" does. That command also deletes the guide's demo
+  folders, `~/qq-try` and `~/qq-ci-venv`, where your own clones may be: this asks about each by name,
+  and `--yes` keeps them. It leaves a `QQ_PYTHON` line, or a `PATH` line written another way, in your
+  startup file and says so.
 - **xo** installs at the commit the [xo quickstart](https://github.com/quirq-ai/xo/blob/main/docs/quickstart.md)
   pins, and updates with its `pip install --force-reinstall --no-deps` at that commit. An xo at another
   commit is reported, not called out of date, since the XO team may have given you a newer one; updating
-  it would move it back to the pin. Removing runs `xo logout` (which deletes the saved XO key and asks
-  before logging gh out), or, when xo cannot run, deletes that key itself, then `~/.xo` and its `PATH`
-  line. After an install, run `xo login` with your XO API key.
+  it would move it back to the pin. When only its `PATH` line is missing, it adds just that line. Only
+  a venv (with `pyvenv.cfg`) at `~/.xo` counts as xo's; any other `~/.xo` is left alone, and xo is not
+  installed over it. Removing runs `xo logout` (which deletes the saved XO key and asks before logging
+  gh out), or, when xo cannot run, deletes that key itself, then `~/.xo` and its `PATH` line. After an
+  install, run `xo login` with your XO API key.
 - **Python.** qq needs 3.11.4 or newer and xo 3.11: `QQ_PYTHON` if set, else `python3`, else the newest
   `python3.N` it finds. For qq, that name is then written to your startup file as `QQ_PYTHON`, so qq
   finds it later. On a Mac with none, the first step is the qq guide's `brew install python@3.13` line
