@@ -557,7 +557,7 @@ test("without a gh login, setting up repos is refused even when asked directly",
 
 /** A HOME with qq installed as its guide leaves it: a clean clone of a local stand-in for quirq-ai/qq
  * (which `git ls-remote` is pointed at too), qqsync at its pin, and the PATH line. */
-function homeWithQq(): { home: string; depot: string; env: Record<string, string> } {
+function homeWithQq(slowLook = false): { home: string; depot: string; env: Record<string, string> } {
   const home = mkdtempSync(join(tmpdir(), "qq-setup-e2e-qq-"));
   const remote = join(mkdtempSync(join(tmpdir(), "qq-setup-e2e-remote-")), "qq.git");
   const git = (...a: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", ...a], { stdio: "pipe" });
@@ -570,7 +570,7 @@ function homeWithQq(): { home: string; depot: string; env: Record<string, string
   git("-C", depot, "commit", "-q", "-m", "qq");
   git("-C", depot, "push", "-q", "origin", "HEAD");
   mkdirSync(join(home, "qq-tools", "qqsync", "bin"), { recursive: true });
-  writeFileSync(join(home, "qq-tools", "qqsync", "bin", "pip"), `#!/bin/sh\necho "qqsync @ git+https://github.com/quirq-ai/sync@${SYNC_PIN}"\n`, { mode: 0o755 });
+  writeFileSync(join(home, "qq-tools", "qqsync", "bin", "pip"), `#!/bin/sh\n${slowLook ? "sleep 1\n" : ""}echo "qqsync @ git+https://github.com/quirq-ai/sync@${SYNC_PIN}"\n`, { mode: 0o755 });
   mkdirSync(join(home, "qq-tools", "bin"));
   writeFileSync(join(home, "qq-tools", "bin", "qq"), "");
   writeFileSync(join(home, ".zshrc"), '\nexport PATH="$HOME/qq-tools/bin:$PATH"\n');
@@ -655,6 +655,26 @@ test("this machine: no run starts while an org answer waits on GitHub, so the fo
     expect(await cli.exited).toBe(0);
     expect(cli.output()).not.toContain("Running the steps picked in the form:");
     expect(existsSync(join(home, ".xo"))).toBe(true);
+  } finally {
+    cli.proc.kill();
+    await page.close();
+  }
+});
+
+test("this machine: quick changes of choice settle on the last one", async ({ browser }) => {
+  // A look that takes about a second, as on a real machine (pip freeze, git ls-remote).
+  const { env } = homeWithQq(true);
+  const cli = await startCli(env);
+  const page = await browser.newPage();
+  try {
+    await page.goto(cli.url);
+    const qq = page.getByRole("radiogroup", { name: "What to do with qq" });
+    await expect(qq.getByRole("radio", { name: "Keep" })).toBeChecked();
+    await expect(page.getByText("Nothing to do with these choices.")).toBeVisible();
+    // Remove, Keep, Remove faster than a look takes: each request makes the one before it stale.
+    for (const pick of ["Remove", "Keep", "Remove"]) await qq.getByRole("radio", { name: pick }).click();
+    await expect(page.getByRole("button", { name: "Run these 2 steps" })).toBeEnabled({ timeout: 8_000 });
+    await expect(page.getByText("Working out the steps…")).toHaveCount(0);
   } finally {
     cli.proc.kill();
     await page.close();

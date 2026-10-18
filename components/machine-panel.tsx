@@ -38,6 +38,7 @@ export function MachinePanel({ onDone }: { onDone: () => void }) {
   const [starting, setStarting] = useState(false);
   const [closing, setClosing] = useState(false);
   const planFor = useRef("");
+  const asked = useRef(0);
   // The signature of the look on screen: the terminal plans only while the machine still matches it.
   const seen = useRef("");
   const reload = useRef<() => Promise<void>>(async () => {});
@@ -48,18 +49,21 @@ export function MachinePanel({ onDone }: { onDone: () => void }) {
     planFor.current = key;
     setChoice(next);
     setRunError(null);
-    const ask = (): void => void api.plan(next, seen.current).then(
-      (p) => planFor.current === key && (setPlanned({ key, plan: p }), setError(null)),
+    const ask = (tries = 0): void => {
+      const mine = ++asked.current;
+      void api.plan(next, seen.current).then(
+      (p) => asked.current === mine && (setPlanned({ key, plan: p }), setError(null)),
       (e: ApiError) => {
-        if (planFor.current !== key) return;
-        // An older request for another choice reached qq-setup after this one: ask again.
-        if (e.superseded) return ask();
+        if (asked.current !== mine) return;
+        // An older request for another choice reached qq-setup after this one: ask again, a few times.
+        if (e.superseded && tries < 3) return void setTimeout(() => asked.current === mine && ask(tries + 1), 100 + Math.random() * 400);
         if (!e.changed) return setError(e.message);
         // Something changed on the machine (new local work, say): show what is there now, so every
         // warning comes from it, and start again from Keep.
         void reload.current().then(() => setRunError(`${e.message}. Pick again.`));
       },
     );
+    };
     ask();
   }, []);
 
