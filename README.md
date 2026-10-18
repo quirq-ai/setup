@@ -68,20 +68,29 @@ npx --allow-remote=root https://codeload.github.com/quirq-ai/setup/tar.gz/<commi
 
 It looks at what is already on this machine and says so: qq's commit in `~/qq-tools/depot` and the newest
 one on GitHub, qqsync's commit, xo's commit in `~/.xo`, and whether each is on your `PATH`. Then it asks,
-for each tool: install it if it is missing; update, remove or keep it if it is there. It prints the
-exact commands, runs them after you say yes, and stops at the first one that fails (each is safe to run
-again). It writes only under your home directory and never to GitHub, and needs no `gh` login.
+for each tool: install it if it is missing (or reinstall it if it is there but broken); update, remove or
+keep it if it is there. It prints the exact commands, runs them after you say yes, and stops at the first
+one that fails (each is safe to run again). It never writes to GitHub and needs no `gh` login. It changes
+files only in your home directory, except that on a Mac with no new enough Python its first step is
+`brew install python@3.13`, which writes to Homebrew's folder.
 
-- **qq** (with qqsync) installs with the [qq guide](https://docs.quirq.dev/docs/install)'s three commands
-  and is removed with its "Remove everything" commands, which also delete the guide's demo folders
-  (`~/qq-try`, `~/qq-ci-venv`) and qq's cache. Updating reruns the install.
+- **qq** (with qqsync) installs with the [qq guide](https://docs.quirq.dev/docs/install)'s three commands.
+  Updating reruns them, so it is offered only when the checkout has no local work: with uncommitted
+  files or local commits in `~/qq-tools/depot`, it keeps qq unless you choose otherwise, and `--yes`
+  always keeps it. Removing deletes `~/qq-tools`, `~/.cache/qq` and the `PATH` line, as the guide's
+  "Remove everything" does. That command also deletes the guide's demo folders, `~/qq-try` and
+  `~/qq-ci-venv`, where your own clones may be: this asks about each by name, and `--yes` keeps them.
+  It leaves a `QQ_PYTHON` line in your startup file and says so.
 - **xo** installs at the commit the [xo quickstart](https://github.com/quirq-ai/xo/blob/main/docs/quickstart.md)
-  pins, updates with its `pip install --force-reinstall --no-deps` at that commit, and is removed with
-  `xo logout` (which deletes the saved XO key), `rm -rf ~/.xo` and its `PATH` line. After an install, run
-  `xo login` with your XO API key.
-- **Python.** Both need Python 3.11.4 or newer: `QQ_PYTHON` if set, else `python3`, else the newest
-  `python3.N` it finds, which it then writes to your startup file as `QQ_PYTHON` so qq finds it later. On a
-  Mac with none, the first step is the qq guide's `brew install python@3.13` line.
+  pins, and updates with its `pip install --force-reinstall --no-deps` at that commit. An xo at another
+  commit is reported, not called out of date, since the XO team may have given you a newer one; updating
+  it would move it back to the pin. Removing runs `xo logout` (which deletes the saved XO key and asks
+  before logging gh out), or, when xo cannot run, deletes that key itself, then `~/.xo` and its `PATH`
+  line. After an install, run `xo login` with your XO API key.
+- **Python.** qq needs 3.11.4 or newer and xo 3.11: `QQ_PYTHON` if set, else `python3`, else the newest
+  `python3.N` it finds. For qq, that name is then written to your startup file as `QQ_PYTHON`, so qq
+  finds it later. On a Mac with none, the first step is the qq guide's `brew install python@3.13` line
+  (just `brew install python@3.13` when only xo is wanted). It checks for `git` first.
 - `--only qq` or `--only xo` picks one; `--update` or `--remove` answers for every tool; `--yes` asks
   nothing (without a terminal it needs it); `--dry-run` prints the commands and runs nothing.
 

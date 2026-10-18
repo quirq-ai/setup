@@ -4,7 +4,8 @@
 // already uses it. The terminal checks your tools, a local form in your browser asks which, and the
 // terminal shows the plan or prints the install commands. `qq-setup install` installs, updates or removes
 // qq and xo on this machine (cli/install.mjs), after showing the commands and a yes.
-// IT NEVER WRITES TO GITHUB: it reads GitHub through your gh login; only `install` writes, under your home.
+// IT NEVER WRITES TO GITHUB: it reads GitHub through your gh login. Only `install` changes this machine,
+// in your home directory (and, on a Mac with no new enough Python, Homebrew's folder).
 
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
