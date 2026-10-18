@@ -196,6 +196,7 @@ test("overlapping choices: only the newest plan started is kept", async () => {
   const [o, n] = /** @type {any[]} */ (await Promise.all([older, newer]));
   assert.equal(o.ok, false);
   assert.match(o.error, /newer choice/);
+  assert.equal(o.superseded, true, "the page asks again when its own request was the one replaced");
   assert.equal(n.ok, true);
   setRun(fakeRun());
   assert.equal((await m.start({ id: n.id })).ok, true);
@@ -271,4 +272,28 @@ test("only an exact export QQ_PYTHON=python3.N line is offered for deletion, nam
     cmd: cleanTmp(removeLineCmd("export QQ_PYTHON=python3.12", "QQ_PYTHON")),
   });
   rmSync(h, { recursive: true });
+});
+
+test("a plan still working out its steps when a run starts is not kept", async () => {
+  /** @type {() => void} */
+  let release = () => {};
+  const gate = new Promise((ok) => (release = () => ok(undefined)));
+  /** @type {() => void} */
+  let finish = () => {};
+  const stepGate = new Promise((ok) => (finish = () => ok(undefined)));
+  const { m, plan, setRun } = setup({ gate: /** @type {Promise<void>} */ (stepGate) });
+  const first = await plan({ qq: "remove" });
+  const seen = (await m.state()).seen;
+  // Update needs Python: its steps wait on python3, after both of plan's earlier busy checks.
+  const base = fakeRun();
+  setRun(async (/** @type {string} */ f, /** @type {string[]} */ a) => (f === "python3" && (await gate), base(f, a)));
+  const second = m.plan({ qq: "update", seen });
+  await new Promise((ok) => setTimeout(ok, 20));
+  assert.equal((await m.start({ id: first.id })).ok, true);
+  release();
+  const s = /** @type {any} */ (await second);
+  assert.equal(s.ok, false);
+  assert.match(s.error, /a run is going/);
+  finish();
+  await finished(m);
 });

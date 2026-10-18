@@ -78,7 +78,7 @@ export function machine({ home, env, platform, run = read, runStep: step = piped
       // The look the page is showing, which its warnings came from; the rest is the choice.
       const { seen: shown, ...rest } = body && typeof body === "object" && !Array.isArray(body) ? /** @type {Record<string, unknown>} */ (body) : { seen: null };
       const s = await look();
-      if (n !== planSeq) return { ok: false, status: 409, error: "a newer choice replaced this one" };
+      if (n !== planSeq) return { ok: false, status: 409, superseded: true, error: "a newer choice replaced this one" };
       if (busy()) return { ok: false, status: 409, error: "a run is going: wait for it to finish" };
       if (typeof shown !== "string" || shown !== seen(s)) {
         plan = null;
@@ -87,7 +87,8 @@ export function machine({ home, env, platform, run = read, runStep: step = piped
       const c = checkChoice(rest, s, demoHere());
       if (!c.ok) return c;
       const p = await stepsFor(s, c.choice);
-      if (n !== planSeq) return { ok: false, status: 409, error: "a newer choice replaced this one" };
+      if (n !== planSeq) return { ok: false, status: 409, superseded: true, error: "a newer choice replaced this one" };
+      if (busy()) return { ok: false, status: 409, error: "a run is going: wait for it to finish" };
       if (p.stop) {
         plan = null;
         return { ok: /** @type {const} */ (true), id: null, steps: [], stop: p.stop, notes: [] };

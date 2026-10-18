@@ -89,6 +89,8 @@ export class ApiError extends Error {
     readonly status: number,
     // The machine no longer matches what the page shows: look again.
     readonly changed = false,
+    // A newer plan request than this one reached qq-setup first.
+    readonly superseded = false,
   ) {
     super(message);
   }
@@ -123,8 +125,8 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   }
   const error = body && typeof body === "object" && "error" in body ? String((body as { error: unknown }).error) : null;
   if (!res.ok || error) {
-    const changed = !!body && typeof body === "object" && "changed" in body && body.changed === true;
-    throw new ApiError(error ?? `qq-setup answered ${res.status}. Is it still running in your terminal?`, res.status, changed);
+    const flag = (k: string) => !!body && typeof body === "object" && k in body && (body as Record<string, unknown>)[k] === true;
+    throw new ApiError(error ?? `qq-setup answered ${res.status}. Is it still running in your terminal?`, res.status, flag("changed"), flag("superseded"));
   }
   return body as T;
 }

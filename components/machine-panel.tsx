@@ -38,6 +38,7 @@ export function MachinePanel({ onDone }: { onDone: () => void }) {
   const [starting, setStarting] = useState(false);
   const [closing, setClosing] = useState(false);
   const planFor = useRef("");
+  const asked = useRef(0);
   // The signature of the look on screen: the terminal plans only while the machine still matches it.
   const seen = useRef("");
   const reload = useRef<() => Promise<void>>(async () => {});
@@ -47,16 +48,23 @@ export function MachinePanel({ onDone }: { onDone: () => void }) {
     const key = JSON.stringify(next);
     planFor.current = key;
     setChoice(next);
-    api.plan(next, seen.current).then(
-      (p) => planFor.current === key && (setPlanned({ key, plan: p }), setError(null)),
+    setRunError(null);
+    const ask = (tries = 0): void => {
+      const mine = ++asked.current;
+      void api.plan(next, seen.current).then(
+      (p) => asked.current === mine && (setPlanned({ key, plan: p }), setError(null)),
       (e: ApiError) => {
-        if (planFor.current !== key) return;
+        if (asked.current !== mine) return;
+        // An older request for another choice reached qq-setup after this one: ask again, a few times.
+        if (e.superseded && tries < 3) return void setTimeout(() => asked.current === mine && ask(tries + 1), 100 + Math.random() * 400);
         if (!e.changed) return setError(e.message);
         // Something changed on the machine (new local work, say): show what is there now, so every
         // warning comes from it, and start again from Keep.
         void reload.current().then(() => setRunError(`${e.message}. Pick again.`));
       },
     );
+    };
+    ask();
   }, []);
 
   // A fresh look at the machine. Every tool starts at Keep: nothing is installed or removed until picked.
@@ -103,9 +111,10 @@ export function MachinePanel({ onDone }: { onDone: () => void }) {
       }
       await load();
     } catch (e) {
-      setRunError((e as Error).message);
-      // A refused run (the machine changed) needs a fresh look and a fresh plan.
+      // A refused run (the machine changed) needs a fresh look and a fresh plan. The look resets the
+      // choices, which clears the last message, so say why afterwards.
       await load().catch(() => {});
+      setRunError((e as Error).message);
     } finally {
       setStarting(false);
     }
