@@ -120,14 +120,15 @@ export function pinIn(freeze, pkg) {
 
 /**
  * What reinstalling or removing qq's checkout would lose, as phrases; empty when there is nothing.
- * It counts files git status shows (changed, staged or untracked; not ones .gitignore names), commits
+ * It counts files git status shows (changed, staged or untracked; not ones git is told to ignore), commits
  * no remote branch has (on any branch or tag, a detached HEAD, or only in a reflog, as after a reset),
  * stashes and other worktrees. When git cannot tell, that is work too, so qq is kept.
  * @param {string} depot @param {Read} run @returns {Promise<string[]>}
  */
 export async function localWork(depot, run) {
   const git = (/** @type {string[]} */ ...args) => run("git", ["-C", depot, ...args]);
-  const status = await git("status", "--porcelain");
+  // --untracked-files=normal: a user's status.showUntrackedFiles=no must not hide untracked files.
+  const status = await git("status", "--porcelain", "--untracked-files=normal");
   const commits = await git("rev-list", "--count", "HEAD", "--branches", "--tags", "--reflog", "--not", "--remotes");
   const stashes = await git("stash", "list");
   const trees = await git("worktree", "list", "--porcelain");
@@ -293,12 +294,12 @@ export function describe(s) {
         (s.qq.localWork ? `, with local work (${s.qq.localWork})`
           : s.qq.latest ? (s.qq.latest === s.qq.commit ? " (the newest)" : `, newest is ${s.qq.latest.slice(0, 7)}`) : " (could not check the newest)") +
         `; qqsync ${s.qq.syncPin ? `at ${s.qq.syncPin.slice(0, 7)}` : "missing"}` +
-        `; ${s.qq.onPath ? "on PATH" : "not on PATH"}` + (pathOnly(s.qq) ? ": PATH line missing" : s.qq.behind.length ? ": update available" : s.qq.localWork ? "" : ": up to date");
+        `; ${s.qq.onPath ? "on PATH" : "not on PATH"}` + (pathOnly(s.qq) ? ": needs its PATH step" : s.qq.behind.length ? ": update available" : s.qq.localWork ? "" : ": up to date");
   const xo = s.xo.foreign ? "~/.xo is there but is not an xo install (no pyvenv.cfg); it is left alone"
     : s.xo.broken ? "not working: ~/.xo is xo's venv but its xo does not run"
     : !s.xo.installed ? "not installed"
       : `installed at ${s.xo.pin?.slice(0, 7) ?? "an unknown commit"}; ${s.xo.onPath ? "on PATH" : "not on PATH"}` +
-        (s.xo.pin !== XO_PIN ? `: not at setup's pin (${XO_PIN.slice(0, 7)})` : pathOnly(s.xo) ? ": PATH line missing" : s.xo.behind.length ? ": update available" : ": up to date");
+        (s.xo.pin !== XO_PIN ? `: not at setup's pin (${XO_PIN.slice(0, 7)})` : pathOnly(s.xo) ? ": needs its PATH step" : s.xo.behind.length ? ": update available" : ": up to date");
   return [`  qq  ${qq}`, `  xo  ${xo}`];
 }
 

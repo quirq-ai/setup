@@ -77,7 +77,7 @@ files only in your home directory, except that on a Mac with no new enough Pytho
 - **qq** (with qqsync) installs with the [qq guide](https://docs.quirq.dev/docs/install)'s three commands.
   Updating reruns them, which deletes and re-clones `~/qq-tools/depot`, so qq is kept when the checkout
   has local work, unless you choose otherwise; `--yes` always keeps it. Local work is what git can
-  show: files `git status` lists (changed, staged or untracked, but not ones `.gitignore` names), commits
+  show: files `git status` lists (changed, staged or untracked, but not ones git is told to ignore), commits
   no remote branch has (on any branch or tag, on a detached HEAD, or only in a reflog, as after a
   reset), stashes, and other worktrees. When git cannot check, qq is kept too. When only the `PATH`
   line is missing, it adds just that line. Removing deletes `~/qq-tools`, `~/.cache/qq` and the

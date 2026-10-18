@@ -198,7 +198,7 @@ test("detect reads what a previous install left", async () => {
   const noQqLine = await detect({ home, latest: "a".repeat(40), run: fakeRun() });
   assert.equal(noQqLine.qq.onPath, false);
   assert.deepEqual(noQqLine.qq.behind, ["not on PATH"]);
-  assert.match(describe(noQqLine)[0], /not on PATH: PATH line missing/);
+  assert.match(describe(noQqLine)[0], /not on PATH: needs its PATH step/);
   assert.equal(defaultAction(noQqLine.qq, {}), "path");
   writeFileSync(join(home, ".zshrc"), `${XO_PATH_LINE}\nexport PATH=$HOME/qq-tools/bin:$PATH\n`);
 
@@ -308,6 +308,19 @@ test("main: a broken xo is offered a reinstall, and --remove removes it", async 
   assert.deepEqual(rm.steps, XO.remove.map((s) => s.cmd));
 });
 
+test("a qq checkout without bin/qq is still checked for local work, and Enter keeps it", async () => {
+  const home = mkdtempSync(join(tmpdir(), "qq-setup-half-"));
+  mkdirSync(join(home, "qq-tools", "depot"), { recursive: true });
+  const s = await detect({ home, latest: null, run: fakeRun({ ahead: "1" }) });
+  assert.equal(s.qq.broken, true);
+  assert.equal(s.qq.localWork, "1 commit on no remote branch");
+  assert.equal(defaultAction(s.qq, {}), "keep");
+  const r = await drive(["--only", "qq"], { home, answers: [""], run: fakeRun({ ahead: "1" }) });
+  assert.match(r.asked[0], /qq is there but not working\. Keep, reinstall or delete it\? \[K\/r\/d\]/);
+  assert.deepEqual(r.steps, []);
+  assert.equal(r.out.at(-1), "\nNothing to do.");
+});
+
 test("main: a ~/.xo that is not xo's is never installed over or removed", async () => {
   const home = mkdtempSync(join(tmpdir(), "qq-setup-other-"));
   mkdirSync(join(home, ".xo", "config"), { recursive: true });
@@ -371,16 +384,28 @@ test("localWork, with real git: every way a checkout can hold work, and none on 
     make(git);
     assert.deepEqual(await localWork(depot, read), ["1 commit on no remote branch"], name);
   }
+  // A branch or tag with no reflog to find it by (made without one, as a fetch or a script can).
+  for (const ref of ["refs/heads/b", "refs/tags/t"]) {
+    const { depot, git } = clone();
+    const sha = git("commit-tree", "-m", "w", "HEAD^{tree}").trim();
+    git("-c", "core.logAllRefUpdates=false", "update-ref", ref, sha);
+    assert.deepEqual(await localWork(depot, read), ["1 commit on no remote branch"], ref);
+  }
   const { depot, git } = clone();
   writeFileSync(join(depot, "notes.txt"), "mine");
   assert.deepEqual(await localWork(depot, read), ["uncommitted or untracked files"], "an untracked file");
+  // Even when the user's git config hides untracked files from git status.
+  git("config", "status.showUntrackedFiles", "no");
+  assert.deepEqual(await localWork(depot, read), ["uncommitted or untracked files"], "showUntrackedFiles=no");
   git("stash", "-q", "-u");
   const stashed = await localWork(depot, read);
   assert.ok(stashed.includes("1 stash"), `a stash: ${stashed}`);
   const wt = clone();
   wt.git("worktree", "add", "-q", "--detach", join(wt.depot, "..", "wt"));
   assert.deepEqual(await localWork(wt.depot, read), ["1 other worktree"]);
-  // Not a checkout git can read: kept.
+  // A count that is not a number, or not a checkout git can read: kept.
+  assert.deepEqual(await localWork(depot, async (/** @type {string} */ f, /** @type {string[]} */ a) => (a.includes("rev-list") ? "x\n" : read(f, a))),
+    ["files git could not check"]);
   assert.deepEqual(await localWork(mkdtempSync(join(tmpdir(), "qq-setup-nogit-")), read), ["files git could not check"]);
 });
 
