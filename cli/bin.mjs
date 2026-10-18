@@ -109,6 +109,8 @@ async function main(argv = process.argv.slice(2)) {
   let gotAnswers = () => {};
   const answered = new Promise((ok) => (gotAnswers = ok));
   let accepted = false;
+  /** Answers still being checked with GitHub: until they settle, no run starts. */
+  let answering = 0;
   /** @type {(v: null) => void} */
   let idleOut = () => {};
   const idle = new Promise((ok) => (idleOut = ok));
@@ -179,9 +181,16 @@ async function main(argv = process.argv.slice(2)) {
         if (!checked.ok) return checked;
         // The form only knows the 100 most recently pushed repos: ask GitHub about the new name itself.
         const st = checked.answers.starter;
-        if (st && (await repoExists(checked.answers.org, st.name))) {
-          return { ok: false, error: `${st.name} already exists in ${checked.answers.org}` };
+        // While GitHub answers, no run may start: this answer would close the form under it.
+        answering++;
+        try {
+          if (st && (await repoExists(checked.answers.org, st.name))) {
+            return { ok: false, error: `${st.name} already exists in ${checked.answers.org}` };
+          }
+        } finally {
+          answering--;
         }
+        if (here?.busy()) return { ok: false, status: 409, error: "the machine steps are still running: wait for them to finish" };
         if (accepted) return { ok: false, status: 409, error: "already answered: the terminal has your first answers" };
         accepted = true;
         gotAnswers(checked.answers);
@@ -194,6 +203,7 @@ async function main(argv = process.argv.slice(2)) {
           touch();
           if (!here) return { ok: false, status: 409, ...noHome };
           if (accepted) return { ok: false, status: 409, error: "the terminal already has your answers, and the form is closing" };
+          if (answering) return { ok: false, status: 409, error: "an answer from the form is on its way to the terminal: wait for it" };
           return here.start(body);
         },
         progress: (from) => (touch(), here ? here.progress(from) : noHome),

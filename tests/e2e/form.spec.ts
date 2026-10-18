@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { createServer } from "node:http";
@@ -6,7 +6,7 @@ import type { AddressInfo } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
-import { XO_PIN } from "../../cli/install.mjs";
+import { SYNC_PIN, XO_PIN } from "../../cli/install.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const SHOTS = join(ROOT, "test-results", "screenshots");
@@ -549,6 +549,112 @@ test("without a gh login, setting up repos is refused even when asked directly",
     const r = await callApi(page, "/api/answers", { org: "acme-labs", repos: ["web"], starter: null });
     expect(r.status).toBe(409);
     expect(r.body.error).toMatch(/^setting up repos needs GitHub: /);
+  } finally {
+    cli.proc.kill();
+    await page.close();
+  }
+});
+
+/** A HOME with qq installed as its guide leaves it: a clean clone of a local stand-in for quirq-ai/qq
+ * (which `git ls-remote` is pointed at too), qqsync at its pin, and the PATH line. */
+function homeWithQq(): { home: string; depot: string; env: Record<string, string> } {
+  const home = mkdtempSync(join(tmpdir(), "qq-setup-e2e-qq-"));
+  const remote = join(mkdtempSync(join(tmpdir(), "qq-setup-e2e-remote-")), "qq.git");
+  const git = (...a: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", ...a], { stdio: "pipe" });
+  git("init", "-q", "--bare", remote);
+  const depot = join(home, "qq-tools", "depot");
+  git("clone", "-q", remote, depot);
+  mkdirSync(join(depot, "bin"));
+  writeFileSync(join(depot, "bin", "qq"), "#!/bin/sh\necho qq\n", { mode: 0o755 });
+  git("-C", depot, "add", ".");
+  git("-C", depot, "commit", "-q", "-m", "qq");
+  git("-C", depot, "push", "-q", "origin", "HEAD");
+  mkdirSync(join(home, "qq-tools", "qqsync", "bin"), { recursive: true });
+  writeFileSync(join(home, "qq-tools", "qqsync", "bin", "pip"), `#!/bin/sh\necho "qqsync @ git+https://github.com/quirq-ai/sync@${SYNC_PIN}"\n`, { mode: 0o755 });
+  mkdirSync(join(home, "qq-tools", "bin"));
+  writeFileSync(join(home, "qq-tools", "bin", "qq"), "");
+  writeFileSync(join(home, ".zshrc"), '\nexport PATH="$HOME/qq-tools/bin:$PATH"\n');
+  const env = { HOME: home, SHELL: "/bin/zsh", GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: `url.${remote}.insteadOf`, GIT_CONFIG_VALUE_0: "https://github.com/quirq-ai/qq" };
+  return { home, depot, env };
+}
+
+test("this machine: local work made after the page looked is never deleted unwarned", async ({ browser }) => {
+  const { depot, env } = homeWithQq();
+  const cli = await startCli(env);
+  const page = await browser.newPage();
+  try {
+    await page.goto(cli.url);
+    const qq = page.getByRole("radiogroup", { name: "What to do with qq" });
+    await expect(page.getByText(/installed at [0-9a-f]{7} \(the newest\).*up to date/)).toBeVisible();
+    await expect(qq.getByRole("radio", { name: "Keep" })).toBeChecked();
+    // Work made after the page looked: picking Update gets no plan, and the page looks again.
+    writeFileSync(join(depot, "MY-NOTES.txt"), "mine");
+    await qq.getByRole("radio", { name: "Update" }).click();
+    await expect(page.getByText(/this machine changed since the page looked at it.*Pick again/)).toBeVisible();
+    await expect(page.getByText(/with local work \(uncommitted or untracked files\)/)).toBeVisible();
+    await expect(qq.getByRole("radio", { name: "Keep" })).toBeChecked();
+    await expect(page.getByText("rm -rf ~/qq-tools/depot", { exact: false })).toHaveCount(0);
+    // Now it is on screen: Update and Remove each say what they delete.
+    for (const pick of ["Update", "Remove"]) {
+      await qq.getByRole("radio", { name: pick }).click();
+      await expect(page.getByText("This deletes your local work in qq")).toBeVisible();
+      await expect(page.getByText(/Pick again/)).toHaveCount(0);
+    }
+    await qq.getByRole("radio", { name: "Keep" }).click();
+    await expect(page.getByText("This deletes your local work in qq")).toHaveCount(0);
+    expect(existsSync(join(depot, "MY-NOTES.txt"))).toBe(true);
+  } finally {
+    cli.proc.kill();
+    await page.close();
+  }
+});
+
+test("this machine: while a choice's steps are on their way, the steps of the last choice are not shown or run", async ({ browser }) => {
+  const { env } = homeWithQq();
+  const cli = await startCli(env);
+  const page = await browser.newPage();
+  try {
+    await page.goto(cli.url);
+    const qq = page.getByRole("radiogroup", { name: "What to do with qq" });
+    await qq.getByRole("radio", { name: "Update" }).click();
+    await expect(page.getByRole("button", { name: "Run these 3 steps" })).toBeEnabled();
+    // Hold the next plan: until it arrives, Update's steps must not stay on screen under Remove.
+    /** @type {() => void} */
+    let release = () => {};
+    const held = new Promise<void>((ok) => (release = ok));
+    await page.route("**/api/machine/plan", async (route) => (await held, route.continue()));
+    await qq.getByRole("radio", { name: "Remove" }).click();
+    await expect(page.getByText("Working out the steps…")).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Run/ })).toBeDisabled();
+    await expect(page.getByText("Install qq", { exact: true })).toHaveCount(0);
+    release();
+    await expect(page.getByRole("button", { name: "Run these 2 steps" })).toBeEnabled();
+  } finally {
+    cli.proc.kill();
+    await page.close();
+  }
+});
+
+test("this machine: no run starts while an org answer waits on GitHub, so the form never closes under one", async ({ browser }) => {
+  const home = homeWithXo();
+  const cli = await startCli({ HOME: home, SHELL: "/bin/zsh", FAKE_GH_SLOW: "repos/acme-labs/new-app" });
+  const page = await browser.newPage();
+  try {
+    await page.goto(cli.url);
+    await expect(page.getByRole("radiogroup", { name: "What to do with xo" })).toBeVisible();
+    const seen = (await callApi(page, "/api/machine")).body.seen;
+    const plan = await callApi(page, "/api/machine/plan", { xo: "remove", seen });
+    expect(plan.status).toBe(200);
+    expect((await callApi(page, "/api/repos?org=acme-labs")).status).toBe(200);
+    const answer = callApi(page, "/api/answers", { org: "acme-labs", repos: ["web"], starter: { name: "new-app", kind: "node-app" } });
+    await new Promise((ok) => setTimeout(ok, 800));
+    const run = await callApi(page, "/api/machine/run", { id: plan.body.id });
+    expect(run.status).toBe(409);
+    expect(run.body.error).toMatch(/on its way to the terminal/);
+    expect((await answer).status).toBe(200);
+    expect(await cli.exited).toBe(0);
+    expect(cli.output()).not.toContain("Running the steps picked in the form:");
+    expect(existsSync(join(home, ".xo"))).toBe(true);
   } finally {
     cli.proc.kill();
     await page.close();

@@ -249,7 +249,13 @@ export function SetupForm() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <RadioGroup value={mode} onValueChange={(v) => setMode(v as Mode)} aria-label="What do you want to do?">
+            <RadioGroup
+              value={mode}
+              onValueChange={(v) => setMode(v as Mode)}
+              // While an answer is on its way, no other panel: a run started now could be cut off when the form closes.
+              disabled={sending}
+              aria-label="What do you want to do?"
+            >
               <div className="flex items-start gap-3">
                 <RadioGroupItem value="machine" id="mode-machine" className="mt-0.5" aria-describedby="mode-machine-what" />
                 <div className="flex flex-col gap-0.5">

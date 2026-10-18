@@ -53,7 +53,7 @@ const MAX_BODY = 16 * 1024;
  *     progress: (from: number) => unknown,
  *   },
  * }} Handlers
- * @typedef {({ ok: true } & Record<string, unknown>) | { ok: false, error: string, status?: number, changed?: boolean }} Result
+ * @typedef {({ ok: true } & Record<string, unknown>) | { ok: false, error: string, status?: number, changed?: boolean, superseded?: boolean }} Result
  */
 
 /**

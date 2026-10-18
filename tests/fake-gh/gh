@@ -58,6 +58,8 @@ if (args.includes("--include") && path === "user") {
   process.stdout.write("HTTP/2.0 200 OK\r\nX-Oauth-Scopes: gist, read:org, repo, workflow\r\n\r\n" + JSON.stringify(routes.user));
   process.exit(0);
 }
+// FAKE_GH_SLOW names one path that answers after 3 seconds, as a slow GitHub would.
+if (process.env.FAKE_GH_SLOW === path) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 3000);
 if (path in routes) { process.stdout.write(JSON.stringify(routes[path])); process.exit(0); }
 console.error(`gh: Not Found (HTTP 404)`);
 process.exit(1);

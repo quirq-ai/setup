@@ -47,16 +47,20 @@ export function MachinePanel({ onDone }: { onDone: () => void }) {
     const key = JSON.stringify(next);
     planFor.current = key;
     setChoice(next);
-    api.plan(next, seen.current).then(
+    setRunError(null);
+    const ask = (): void => void api.plan(next, seen.current).then(
       (p) => planFor.current === key && (setPlanned({ key, plan: p }), setError(null)),
       (e: ApiError) => {
         if (planFor.current !== key) return;
+        // An older request for another choice reached qq-setup after this one: ask again.
+        if (e.superseded) return ask();
         if (!e.changed) return setError(e.message);
         // Something changed on the machine (new local work, say): show what is there now, so every
         // warning comes from it, and start again from Keep.
         void reload.current().then(() => setRunError(`${e.message}. Pick again.`));
       },
     );
+    ask();
   }, []);
 
   // A fresh look at the machine. Every tool starts at Keep: nothing is installed or removed until picked.
