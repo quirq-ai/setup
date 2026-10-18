@@ -17,22 +17,24 @@ refuses one without it. npm 11.14 and later honour the flag, though by default t
 tarball links. npm 10 and npm 11.0 to 11.13 ignore it. Either way it is harmless here, because the package has no
 dependencies.
 
-**This version only reads.** It shows the plan or prints commands and stops: it creates no repo,
+**The form only reads.** It shows the plan or prints commands and stops: it creates no repo,
 opens no pull request, changes no setting and installs nothing. The version that carries the plan out comes next, after review.
+Installing qq and xo on your own machine is a separate command, [`install`](#install-update-or-remove-qq-and-xo), which runs
+its commands only after you say yes.
 
 ## What it does
 
 1. **Checks** Node 22+ (CI tests 22 and 24; qq's own toolchain is Node 24), `git`, `gh` (logged in with the `repo` and `read:org` scopes, which
-   `gh auth login` grants) and Python 3.11+ (the setup step will run infra-config's generator and
-   gate). It notes that the setup step will also need the `workflow` scope, and how to remove it
+   `gh auth login` grants) and Python 3.11.4+ (`QQ_PYTHON` if set, else `python3`: qq runs that one, and the setup step will
+   run infra-config's generator and gate). It notes that the setup step will also need the `workflow` scope, and how to remove it
    afterwards. It never asks for `admin:org`, `delete_repo` or `gist`. It refuses to run while
    `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN` or `GITHUB_ENTERPRISE_TOKEN` is set, so it
    only ever acts as your own `gh` login.
 2. **Opens a form** on `127.0.0.1` (link printed in the terminal; `--no-browser` only prints it).
    It asks what you want to do:
-   - **Install qq on my machine and work on a repo.** The terminal prints the three commands from the
-     [qq guide](https://docs.quirq.dev/docs/qq) that install `qq` and `qqsync` and put them on your
-     `PATH`, then `qq fetch https://github.com/<owner>/<name>` for the repo you name (`git clone` on a Mac),
+   - **Install qq on my machine and work on a repo.** The terminal prints the commands from the
+     [qq guide](https://docs.quirq.dev/docs/install) that install `qq` and `qqsync` and put them on your
+     `PATH` (on a Mac, its Python step first), then `qq fetch https://github.com/<owner>/<name>` for the repo you name (`git clone` on a Mac),
      and what `qq sync`, `qq build`, `qq test` and `qq run` do (on a Mac, `qq build`, `qq test` and
      `qq run`, with the caveat under "On a Mac"). It runs none of them. To push
      branches to the repo, an owner gives you Write access. A login that owns no org starts here.
@@ -58,6 +60,46 @@ Exit codes, as gate and installer use them: 0 done, 1 not ready or stopped (a fa
 request from the form for 30 minutes), 2 error. Ctrl-C stops it by signal, which shells report as
 130.
 
+## Install, update or remove qq and xo
+
+```sh
+npx --allow-remote=root https://codeload.github.com/quirq-ai/setup/tar.gz/<commit> install
+```
+
+It looks at what is already on this machine and says so: qq's commit in `~/qq-tools/depot` and the newest
+one on GitHub, qqsync's commit, xo's commit in `~/.xo`, and whether each is on your `PATH`. Then it asks,
+for each tool: install it if it is missing (or reinstall it if it is there but broken); update, remove or
+keep it if it is there. It prints the exact commands, runs them after you say yes, and stops at the first
+one that fails (each is safe to run again). It never writes to GitHub and needs no `gh` login. It changes
+files only in your home directory, except that on a Mac with no new enough Python its first step is
+`brew install python@3.13`, which writes to Homebrew's folder.
+
+- **qq** (with qqsync) installs with the [qq guide](https://docs.quirq.dev/docs/install)'s three commands.
+  Updating reruns them, which deletes and re-clones `~/qq-tools/depot`, so qq is kept when the checkout
+  has local work, unless you choose otherwise; `--yes` always keeps it. Local work is what git can
+  show: files `git status` lists (changed, staged or untracked, but not ones git is told to ignore), commits
+  no remote branch has (on any branch or tag, on a detached HEAD, or only in a reflog, as after a
+  reset), stashes, and other worktrees. When git cannot check, qq is kept too. When only the `PATH`
+  line is missing, it adds just that line. Removing deletes `~/qq-tools`, `~/.cache/qq` and the
+  `PATH` line, as the guide's "Remove everything" does. That command also deletes the guide's demo
+  folders, `~/qq-try` and `~/qq-ci-venv`, where your own clones may be: this asks about each by name,
+  and `--yes` keeps them. It leaves a `QQ_PYTHON` line, or a `PATH` line written another way, in your
+  startup file and says so.
+- **xo** installs at the commit the [xo quickstart](https://github.com/quirq-ai/xo/blob/main/docs/quickstart.md)
+  pins, and updates with its `pip install --force-reinstall --no-deps` at that commit. An xo at another
+  commit is reported, not called out of date, since the XO team may have given you a newer one; updating
+  it would move it back to the pin. When only its `PATH` line is missing, it adds just that line. Only
+  a venv (with `pyvenv.cfg`) at `~/.xo` counts as xo's; any other `~/.xo` is left alone, and xo is not
+  installed over it. Removing runs `xo logout` (which deletes the saved XO key and asks before logging
+  gh out), or, when xo cannot run, deletes that key itself, then `~/.xo` and its `PATH` line. After an
+  install, run `xo login` with your XO API key.
+- **Python.** qq needs 3.11.4 or newer and xo 3.11: `QQ_PYTHON` if set, else `python3`, else the newest
+  `python3.N` it finds. For qq, that name is then written to your startup file as `QQ_PYTHON`, so qq
+  finds it later. On a Mac with none, the first step is the qq guide's `brew install python@3.13` line
+  (just `brew install python@3.13` when only xo is wanted). It checks for `git` first.
+- `--only qq` or `--only xo` picks one; `--update` or `--remove` answers for every tool; `--yes` asks
+  nothing (without a terminal it needs it); `--dry-run` prints the commands and runs nothing.
+
 ## How it keeps your login safe
 
 - Every GitHub call is `gh api --method GET`. qq-setup never reads, stores or prints your token:
@@ -81,8 +123,9 @@ request from the form for 30 minutes), 2 error. Ctrl-C stops it by signal, which
 
 ## On a Mac
 
-It works the same. macOS ships Python 3.9, so the later setup step needs a newer one
-(`brew install python@3.14`), as does installing qq. The form, the terminal and this section say the
+It works the same. macOS ships Python 3.9, too old for qq, so on a Mac the install commands start
+with the qq guide's Python step: `brew install python@3.13`, `export QQ_PYTHON=python3.13` in
+`~/.zshrc`, and a new terminal. About toolchains, the form, the terminal and this section say the
 same thing:
 
 qq fetches toolchains for Linux x86_64 only, so on a Mac qq fetch clones the repo and then stops with
@@ -93,7 +136,7 @@ qq run uses your PATH.
 
 So on a Mac the form and terminal show `git clone` instead of `qq fetch`, leave out
 `qq sync`, and list `qq build`, `qq test` and `qq run`. See the
-[qq guide](https://docs.quirq.dev/docs/qq). The CI workflows qq sets up for a repo run on
+[qq guide](https://docs.quirq.dev/docs/install). The CI workflows qq sets up for a repo run on
 GitHub's Linux runners, whatever machine you work on.
 
 ## Develop

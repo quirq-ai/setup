@@ -1,8 +1,8 @@
 // @ts-check
 // The second way in: put qq on this machine and work on a repo that already uses it. qq-setup only
 // prints these commands; it runs none of them. They are copied from the qq guide
-// (quirq-ai/docs content/docs/qq.mdx, "Use qq on your machine", at bb9a832); change both together,
-// with tests/fixtures/qq-guide-install.txt.
+// (quirq-ai/docs content/docs/install.mdx, "Install qq", at d02c27f); change both together,
+// with tests/fixtures/qq-guide-install.txt. MAC_PYTHON is that page's "On a Mac, set up Python first" command.
 
 import { isBlankRepo, parseRepo } from "./names.mjs";
 
@@ -14,13 +14,30 @@ export const INSTALL = [
   },
   {
     what: "Install qqsync (pinned to the sync commit qq itself pins)",
-    cmd: "( set -e; mkdir -p ~/qq-tools; rm -rf ~/qq-tools/qqsync; python3 -m venv ~/qq-tools/qqsync; ~/qq-tools/qqsync/bin/pip install -q --disable-pip-version-check \"qqsync @ git+https://github.com/quirq-ai/sync@aecb0fdb89f0d88b61a26052f5b3c26c48392841\"; ~/qq-tools/qqsync/bin/qqsync --version )",
+    cmd: "( set -e; mkdir -p ~/qq-tools; rm -rf ~/qq-tools/qqsync; \"${QQ_PYTHON:-python3}\" -m venv ~/qq-tools/qqsync; ~/qq-tools/qqsync/bin/pip install -q --disable-pip-version-check \"qqsync @ git+https://github.com/quirq-ai/sync@9821f745690d5150cac70cd2eee54c97d431e6c3\"; ~/qq-tools/qqsync/bin/qqsync --version )",
   },
   {
     what: "Put both on your PATH (adds one line to ~/.bashrc for bash, to ~/.zshrc otherwise, and on a Mac to the first of ~/.bash_profile, ~/.bash_login or ~/.profile that bash already reads; open a new terminal afterwards)",
     cmd: "( case \"$SHELL:$(uname)\" in */bash:Darwin) for rc in ~/.bash_profile ~/.bash_login ~/.profile ~/.bash_profile; do [ -f \"$rc\" ] && break; done ;; */bash:*) rc=~/.bashrc ;; *) rc=~/.zshrc ;; esac; mkdir -p ~/qq-tools/bin && ln -sf ~/qq-tools/depot/bin/qq ~/qq-tools/qqsync/bin/qqsync ~/qq-tools/bin/ && { grep -qs 'qq-tools/bin:' \"$rc\" || printf '\\nexport PATH=\"$HOME/qq-tools/bin:$PATH\"\\n' >> \"$rc\"; } && echo \"qq-tools/bin is on PATH in $rc; open a new terminal\" )",
   },
 ];
+
+/** On a Mac, before INSTALL: macOS's python3 is 3.9, and brew's python@3.13 adds only python3.13, so
+ * qq is told to use it (qq bin/qq:20). The qq guide's command, copied unchanged. */
+export const MAC_PYTHON = {
+  what: "On a Mac, first give qq a new enough Python (macOS's python3 is 3.9), then open a new terminal. If your shell is bash, put the export line in the first of ~/.bash_profile, ~/.bash_login or ~/.profile that you have instead",
+  cmd: "brew install python@3.13 && { grep -qs 'QQ_PYTHON=' ~/.zshrc || echo 'export QQ_PYTHON=python3.13' >> ~/.zshrc; }",
+};
+
+/** The install steps for this platform: on a Mac, Python first. @param {string} platform */
+export function installFor(platform) {
+  return platform === "darwin" ? [MAC_PYTHON, ...INSTALL] : INSTALL;
+}
+
+/** The Python qq's launcher runs (qq bin/qq:20): QQ_PYTHON when set and not empty, else python3. */
+export function qqPython(/** @type {Record<string, string | undefined>} */ env) {
+  return env.QQ_PYTHON || "python3";
+}
 
 /** What a person runs inside a repo that has infra/repo.toml. */
 export const USE = [
@@ -41,7 +58,8 @@ export const USE_MAC = [
 export const USE_NOTE =
   "qq build and qq test work where qq has a local recipe for the repo's kind; the repo's infra/repo.toml says when it has none.";
 
-export const NEEDS = "git and python3 3.11.4 or newer with its venv module (Debian/Ubuntu: python3-venv).";
+export const NEEDS =
+  "git and Python 3.11.4 or newer with its venv module (Debian/Ubuntu: python3-venv). qq uses python3 unless QQ_PYTHON names another Python.";
 
 /** One statement about macOS, shared with preflight, the page and the README (a test keeps them equal). */
 export const MAC =
@@ -98,7 +116,7 @@ export function toolsText(repo, platform) {
   const { use, useNote } = commandsFor(platform);
   return [
     "Install qq on this machine. Run each command once:",
-    ...INSTALL.flatMap((s, i) => [`  ${i + 1}. ${s.what}:`, `     ${s.cmd}`]),
+    ...installFor(platform).flatMap((s, i) => [`  ${i + 1}. ${s.what}:`, `     ${s.cmd}`]),
     `Needs ${NEEDS}`,
     "",
     `Then get ${repo ?? "a repo that has infra/repo.toml"}:`,

@@ -316,6 +316,9 @@ test("on a Mac: git clone, the note beside it, and no qq sync", async ({ browser
     await expect(page.getByText("Write it as owner/name, like quirq-ai/innernet.")).toBeVisible();
     await expect(page.getByRole("button", { name: /Print these/ })).toBeDisabled();
     await page.getByLabel("Repo (optional)").fill("quirq-ai/innernet");
+    // A Mac's python3 is 3.9: the qq guide's Python step comes before the install commands.
+    await expect(page.locator("pre").first()).toHaveText(
+      "brew install python@3.13 && { grep -qs 'QQ_PYTHON=' ~/.zshrc || echo 'export QQ_PYTHON=python3.13' >> ~/.zshrc; }");
     await expect(page.getByText("git clone https://github.com/quirq-ai/innernet", { exact: true })).toBeVisible();
     await expect(page.getByText(/stops with "no pin for platform".*--toolchain NAME=ROOT/)).toBeVisible();
     await expect(page.getByText(/^qq fetch https/)).toHaveCount(0);

@@ -4,7 +4,7 @@
 
 import { execFile } from "node:child_process";
 import { TOKEN_VARS, whoami } from "./gh.mjs";
-import { MAC } from "./tools.mjs";
+import { MAC, MAC_PYTHON, qqPython } from "./tools.mjs";
 
 /** What this read-only build needs: `gh auth login` grants both (with gist, which setup never uses). */
 export const NEEDED_SCOPES = ["repo", "read:org"];
@@ -18,7 +18,7 @@ export const LATER_SCOPES = ["workflow"];
 /**
  * Pure: turn what was observed into checks.
  * @param {{ node: string, platform: string, env: Record<string, string | undefined>,
- *   git: string | null, gh: string | null, python: string | null,
+ *   git: string | null, gh: string | null, python: string | null, pythonCmd: string,
  *   login: string | null, scopes: string[] | null, loginError: string | null }} seen
  * @returns {Check[]}
  */
@@ -38,13 +38,16 @@ export function checks(seen) {
   out.push({ name: "git", ok: !!seen.git, fatal: true, detail: seen.git ?? "git is not installed" });
   out.push({ name: "gh", ok: !!seen.gh, fatal: true, detail: seen.gh ?? "gh (GitHub CLI) is not installed: https://cli.github.com" });
 
-  // The step that writes generates workflows with infra-config's qqcfg, which needs Python 3.11+.
-  const py = seen.python ? /(\d+)\.(\d+)/.exec(seen.python) : null;
-  const pyOk = !!py && (Number(py[1]) > 3 || (Number(py[1]) === 3 && Number(py[2]) >= 11));
-  out.push({ name: "Python 3.11+", ok: pyOk, fatal: false,
-    detail: pyOk ? String(seen.python)
-      : `${seen.python ?? "python3 not found"}; the setup step will need Python 3.11 or newer` +
-        (seen.platform === "darwin" ? " (macOS ships 3.9: brew install python@3.14)" : "") });
+  // qq's launcher runs QQ_PYTHON, else python3, and refuses anything older than 3.11.4 (qq bin/qq:20-23);
+  // the setup step's qqcfg needs 3.11+. Check the one qq will run.
+  const py = seen.python ? /(\d+)\.(\d+)\.(\d+)/.exec(seen.python) : null;
+  const [maj, min, mic] = py ? py.slice(1).map(Number) : [0, 0, 0];
+  const pyOk = maj > 3 || (maj === 3 && (min > 11 || (min === 11 && mic >= 4)));
+  out.push({ name: "Python 3.11.4+", ok: pyOk, fatal: false,
+    detail: `${seen.python ?? "not found"} (${seen.pythonCmd}${seen.env.QQ_PYTHON ? ", from QQ_PYTHON" : ""})` +
+      (pyOk ? "" : "; qq and the setup step need Python 3.11.4 or newer" +
+        (seen.platform === "darwin" ? `. macOS's python3 is 3.9: run  ${MAC_PYTHON.cmd}  then open a new terminal`
+          : "; install one, and set QQ_PYTHON to it unless it is python3")) });
 
   if (seen.gh && !setVars.length) {
     out.push({ name: "gh login", ok: !!seen.login, fatal: true,
@@ -90,10 +93,11 @@ function version(cmd, args) {
 
 /** Observe the machine and the login, then check. @returns {Promise<Check[]>} */
 export async function preflight() {
+  const pythonCmd = qqPython(process.env);
   const [git, ghv, python] = await Promise.all([
     version("git", ["--version"]),
     version("gh", ["--version"]),
-    version("python3", ["--version"]),
+    version(pythonCmd, ["--version"]),
   ]);
   let login = null, scopes = null, loginError = null;
   if (ghv && !TOKEN_VARS.some((v) => process.env[v])) {
@@ -105,5 +109,5 @@ export async function preflight() {
     }
   }
   return checks({ node: process.version, platform: process.platform, env: process.env,
-    git, gh: ghv, python, login, scopes, loginError });
+    git, gh: ghv, python, pythonCmd, login, scopes, loginError });
 }
