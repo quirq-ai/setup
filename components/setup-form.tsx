@@ -206,7 +206,7 @@ export function SetupForm() {
 
   const go = (to: React.RefObject<HTMLElement | null>) => to.current?.scrollIntoView({ behavior: "smooth", block: "start" });
 
-  // qq-setup's machine steps are Linux and macOS only (cli/bin.mjs): on Windows the page says so.
+  // qq-setup's machine steps are Linux and macOS only (cli/main.mjs): on Windows the page says so.
   const windows = state?.platform === "win32";
 
   return (

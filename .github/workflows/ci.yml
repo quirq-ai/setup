@@ -127,3 +127,31 @@ jobs:
           [ -n "$up" ] || { echo "::error::the local tarball server did not start"; exit 1; }
           dir=$(mktemp -d)
           (cd "$dir" && npx --yes --allow-remote=root "http://127.0.0.1:8731/$sha" --version)
+
+  # cli/bin.mjs must stay readable by an old Node, so that it says plainly that qq-setup needs Node 22.
+  # Ubuntu 22.04's own Node is 12; 24.04's is 18. The unit test only fakes the version on a new Node.
+  old-node:
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [12, 18]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: An old Node gets the plain Node 22 message
+        shell: bash
+        run: |
+          set -u
+          code=0; out=$(node cli/bin.mjs --version 2>&1) || code=$?
+          want="qq-setup needs Node 22 or newer, and this is Node $(node -p process.versions.node)."
+          [ "$code" = 1 ] && [ "$(printf '%s\n' "$out" | head -1)" = "$want" ] || { printf '%s\n' "$out"; echo "::error::exit $code"; exit 1; }
