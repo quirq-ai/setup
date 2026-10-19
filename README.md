@@ -34,7 +34,9 @@ terminal as [`install`](#install-update-or-remove-qq-and-xo).
    for this machine only.
 2. **Opens a form** on `127.0.0.1` (link printed in the terminal; `--no-browser` only prints it).
    It is one page in two steps, with a bar at the top that takes you to either. When qq is not on
-   this machine, the page opens at step 1 and asks you to install qq first.
+   this machine, the page opens at step 1 and asks you to install qq first. Short lines such as
+   "What is qq?" open in place when tapped: a few lines on what qq, xo and step 2 do, most with a
+   link to the guide that says more.
    - **1. Install, update or remove qq and xo on this machine.** It shows what is
      installed, as [`install`](#install-update-or-remove-qq-and-xo) does, and a choice per tool. Each
      starts at Keep (or Don't install), so nothing is installed or removed until you pick it. It

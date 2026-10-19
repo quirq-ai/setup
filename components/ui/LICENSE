@@ -4,7 +4,8 @@ The files in this folder are copied from shadcn/ui
 @/lib/utils. button.tsx and badge.tsx also replace text-white on the
 destructive variant with text-destructive-foreground and drop the
 dark:bg-destructive/60 overlay (copied from quirq-ai/monitoring at dd0e680, where
-its AGENTS.md requires this). They are used under
+its AGENTS.md requires this). alert.tsx drops line-clamp-1 from AlertTitle, so a long
+title wraps instead of being cut at narrow widths. They are used under
 the licence below.
 
 MIT License
