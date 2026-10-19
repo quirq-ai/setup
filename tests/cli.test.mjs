@@ -578,7 +578,7 @@ test("cli: if the link is used while the browser page is being prepared, no brow
   }
 });
 
-test("cli: an old Node gets one plain line about Node 22, not a SyntaxError", async () => {
+test("cli: an old Node gets a plain message about Node 22, not a SyntaxError", async () => {
   const bin = fileURLToPath(new URL("../cli/bin.mjs", import.meta.url));
   // The entry must stay readable by Node 12: no static imports and no syntax newer than ES2019.
   const src = readFileSync(bin, "utf8").replace(/^\s*\/\/.*$/gm, "");
