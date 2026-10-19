@@ -1,7 +1,7 @@
 // @ts-check
 // qq's install commands, which `qq-setup install` and the page's "This machine" steps run (cli/install.mjs).
 // They are copied from the qq guide
-// (quirq-ai/docs content/docs/install.mdx, "Install qq", at d02c27f); change both together,
+// (quirq-ai/docs content/docs/install.mdx, "Install qq", at 3f8df0d); change both together,
 // with tests/fixtures/qq-guide-install.txt. MAC_PYTHON is that page's "On a Mac, set up Python first" command.
 
 /** Each runs inside `( … )`, so it leaves the shell as it was, and each is safe to run again. */

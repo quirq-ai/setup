@@ -13,7 +13,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { INSTALL, MAC_PYTHON } from "./tools.mjs";
 
-/** The qq guide's "Remove everything" commands (quirq-ai/docs content/docs/install.mdx, at d02c27f). */
+/** The qq guide's "Remove everything" commands (quirq-ai/docs content/docs/install.mdx, at 3f8df0d). */
 export const QQ_REMOVE = [
   "( chmod -R u+w ~/.cache/qq 2>/dev/null; rm -rf ~/qq-tools ~/qq-try ~/qq-ci-venv ~/.cache/qq )",
   "( for f in ~/.bashrc ~/.bash_profile ~/.bash_login ~/.profile ~/.zshrc; do grep -qsxF 'export PATH=\"$HOME/qq-tools/bin:$PATH\"' \"$f\" || continue; awk '$0 == \"export PATH=\\\"$HOME/qq-tools/bin:$PATH\\\"\" { if (b > 0) b--; next } /^$/ { b++; next } { while (b > 0) { print \"\"; b-- } print } END { while (b > 0) { print \"\"; b-- } }' \"$f\" >| \"$f.qq-tmp\" || exit 1; if [ -L \"$f\" ] || grep -q '[^[:space:]]' \"$f.qq-tmp\"; then cat \"$f.qq-tmp\" >| \"$f\" || exit 1; rm -f \"$f.qq-tmp\"; echo \"removed the qq-tools/bin line from $f\"; else rm -f \"$f\" \"$f.qq-tmp\"; echo \"deleted $f, which held only that line\"; fi; done )",

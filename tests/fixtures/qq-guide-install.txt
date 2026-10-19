@@ -1,5 +1,5 @@
-# The install commands in quirq-ai/docs content/docs/install.mdx at d02c27f5f3bd563b136f7d3cf8d0bc54bd178d9a,
-# lines 40, 58, 71 and 86, copied unchanged (line 40, a Mac's Python step, without its two-space indent). cli/tools.mjs must print exactly these; update both together.
+# The install commands in quirq-ai/docs content/docs/install.mdx at 3f8df0d99c2635730723dfd903a2d5e9a378688f,
+# lines 40, 59, 72 and 87, copied unchanged (line 40, a Mac's Python step, without its two-space indent). cli/tools.mjs must print exactly these; update both together.
 brew install python@3.13 && { grep -qs 'QQ_PYTHON=' ~/.zshrc || echo 'export QQ_PYTHON=python3.13' >> ~/.zshrc; }
 ( set -e; mkdir -p ~/qq-tools; rm -rf ~/qq-tools/depot; git clone -q https://github.com/quirq-ai/qq ~/qq-tools/depot; ~/qq-tools/depot/bin/qq --version )
 ( set -e; mkdir -p ~/qq-tools; rm -rf ~/qq-tools/qqsync; "${QQ_PYTHON:-python3}" -m venv ~/qq-tools/qqsync; ~/qq-tools/qqsync/bin/pip install -q --disable-pip-version-check "qqsync @ git+https://github.com/quirq-ai/sync@9821f745690d5150cac70cd2eee54c97d431e6c3"; ~/qq-tools/qqsync/bin/qqsync --version )
