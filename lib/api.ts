@@ -81,7 +81,7 @@ export class ApiError extends Error {
     readonly changed = false,
     // A newer plan request than this one reached qq-setup first.
     readonly superseded = false,
-    // This machine's system is one qq and xo do not install on (Windows).
+    // qq-setup cannot install on this machine's system (Windows).
     readonly unsupported = false,
   ) {
     super(message);

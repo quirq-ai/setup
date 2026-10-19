@@ -142,11 +142,20 @@ export function MachinePanel({ onDone, onLook, held }: {
 
   if (!m || !choice) {
     return error ? (
-      <Alert variant={unsupported ? "default" : "destructive"} role="alert">
-        <TriangleAlert />
-        <AlertTitle>{unsupported ? "qq and xo do not install on Windows" : "Could not look at this machine"}</AlertTitle>
-        <AlertDescription>{error}</AlertDescription>
-      </Alert>
+      <div className="flex flex-col gap-3">
+        <Alert variant={unsupported ? "default" : "destructive"} role="alert">
+          <TriangleAlert />
+          <AlertTitle>{unsupported ? "qq-setup cannot install qq or xo on Windows" : "Could not look at this machine"}</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+        {/* What the tools are still matters here, before setting up WSL. */}
+        {unsupported && (
+          <>
+            <AboutQq />
+            <AboutXo />
+          </>
+        )}
+      </div>
     ) : (
       <p className="flex items-center gap-2 text-muted-foreground">
         <Spinner /> Looking at what is installed…
