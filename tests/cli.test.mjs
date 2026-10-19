@@ -577,3 +577,19 @@ test("cli: if the link is used while the browser page is being prepared, no brow
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test("cli: an old Node gets one plain line about Node 22, not a SyntaxError", async () => {
+  const bin = fileURLToPath(new URL("../cli/bin.mjs", import.meta.url));
+  // The entry must stay readable by Node 12: no static imports and no syntax newer than ES2019.
+  const src = readFileSync(bin, "utf8").replace(/^\s*\/\/.*$/gm, "");
+  assert.doesNotMatch(src, /^\s*import\s[^(]/m, "no static import in cli/bin.mjs");
+  assert.doesNotMatch(src, /\?\.|\?\?|=>|`/, "no optional chaining, ??, arrows or template literals in cli/bin.mjs");
+  const asOld = "data:text/javascript,Object.defineProperty(process.versions,'node',{value:'12.22.9'})";
+  const proc = spawn(process.execPath, [`--import=${asOld}`, bin, "--no-browser"], { env: { PATH: process.env.PATH } });
+  let out = "";
+  proc.stdout.on("data", (c) => (out += c));
+  proc.stderr.on("data", (c) => (out += c));
+  const code = await new Promise((ok) => proc.on("exit", ok));
+  assert.equal(code, 1);
+  assert.equal(out, "qq-setup needs Node 22 or newer, and this is Node 12.22.9.\nInstall Node 22 or newer, then run the same command again.\n");
+});
