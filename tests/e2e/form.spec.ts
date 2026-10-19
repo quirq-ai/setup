@@ -252,6 +252,71 @@ test("each command has a copy button that copies it exactly", async ({ browser }
   }
 });
 
+// Each "learn more" line, the guide it links to, and the step it sits in (null: under the intro).
+const LEARN = [
+  { title: "How qq and xo fit together", href: null },
+  { title: "What is qq?", href: "https://docs.quirq.dev/docs" },
+  { title: "What is xo?", href: "https://github.com/quirq-ai/xo/blob/main/docs/quickstart.md" },
+  { title: "What does setting up repos do?", href: "https://docs.quirq.dev/docs/add-a-repo" },
+] as const;
+
+for (const scheme of ["light", "dark"] as const) {
+  for (const width of [320, 1280]) {
+    test(`learn more ${width}px ${scheme}: closed at first, each opens in place with its guide link`, async ({ browser }) => {
+      const cli = await startCli();
+      const page = await browser.newPage({ viewport: { width, height: width === 1280 ? 800 : 844 }, colorScheme: scheme });
+      try {
+        await page.goto(cli.url);
+        await expect(page.getByText("billing-api", { exact: true })).toBeAttached();
+        for (const { title } of LEARN) {
+          await expect(page.getByRole("button", { name: title, exact: true })).toHaveAttribute("aria-expanded", "false");
+        }
+        await expect(page.getByRole("link", { name: /^What is qq: the guide/ })).toHaveCount(0);
+
+        for (const [i, { title, href }] of LEARN.entries()) {
+          const trigger = page.getByRole("button", { name: title, exact: true });
+          // Every other line opens with the keyboard, so both ways are covered.
+          if (i % 2) {
+            await trigger.focus();
+            await page.keyboard.press("Enter");
+          } else {
+            await trigger.click();
+          }
+          await expect(trigger).toHaveAttribute("aria-expanded", "true");
+          const panel = page.locator(`#${await trigger.getAttribute("aria-controls")}`);
+          await expect(panel).toBeVisible();
+          // In the page, never a popup: nothing is laid over it.
+          await expect(page.getByRole("dialog")).toHaveCount(0);
+          expect(await panel.evaluate((el) => getComputedStyle(el).position)).toBe("static");
+          if (href) {
+            const link = panel.getByRole("link");
+            await expect(link).toHaveAttribute("href", href);
+            await expect(link).toHaveAttribute("target", "_blank");
+            await expect(link).toHaveAttribute("rel", "noreferrer");
+          }
+        }
+        // Alert titles wrap instead of being cut short, even at 320 px.
+        const title = page.getByText("Start here: qq is not on this machine", { exact: true });
+        await expect(title).toBeVisible();
+        expect(await title.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(0);
+        // Everything open still fits the width, with no sideways scroll.
+        expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
+        await page.evaluate(() => window.scrollTo(0, 0));
+        mkdirSync(SHOTS, { recursive: true });
+        await page.screenshot({ path: join(SHOTS, `learn-more-${width}-${scheme}.png`), fullPage: true });
+
+        const qq = page.getByRole("button", { name: "What is qq?", exact: true });
+        await qq.click();
+        await expect(qq).toHaveAttribute("aria-expanded", "false");
+        await expect(page.getByRole("link", { name: /^What is qq: the guide/ })).toHaveCount(0);
+      } finally {
+        cli.proc.kill();
+        await page.close();
+      }
+    });
+  }
+}
+
 /** Where an element ends, in the viewport. */
 async function bottom(el: Locator): Promise<number> {
   const b = (await el.boundingBox())!;

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CircleCheck, TriangleAlert } from "lucide-react";
+import { AboutOrgSetup, AboutTogether } from "@/components/about";
 import { MachinePanel } from "@/components/machine-panel";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -212,6 +213,7 @@ export function SetupForm() {
         <p className="text-muted-foreground">
           First install qq on this machine (and xo, if you want it), then put your org&apos;s repos under qq.
         </p>
+        <AboutTogether />
         {state?.readOnly && (
           <p className="text-sm text-muted-foreground">
             It changes nothing on GitHub. On this machine it runs only the steps you pick, after you press Run.
@@ -268,6 +270,7 @@ export function SetupForm() {
           <h2 id="step-repos" className="font-display text-xl">
             2. Set up repos in an org you own
           </h2>
+          <AboutOrgSetup />
           {hasQq === false && (
             <p className="text-sm text-muted-foreground">qq is not on this machine yet: install it in step 1 first.</p>
           )}

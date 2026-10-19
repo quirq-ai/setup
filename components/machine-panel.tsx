@@ -9,6 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Spinner } from "@/components/ui/spinner";
+import { AboutQq, AboutXo } from "@/components/about";
 import { Command } from "@/components/command";
 import { api, type ApiError, type Action, type Choice, type Machine, type MachineTool, type Plan, type Progress } from "@/lib/api";
 
@@ -175,6 +176,7 @@ export function MachinePanel({ onDone, onLook, held }: {
               <fieldset key={tool} className="flex flex-col gap-3" disabled={running}>
                 <legend className="font-medium">{NAMES[tool]}</legend>
                 <p className="text-sm text-muted-foreground break-words">{t.line}</p>
+                {tool === "qq" ? <AboutQq /> : <AboutXo />}
                 {tool === "xo" && m.xo.note && <p className="text-sm text-muted-foreground">{m.xo.note}.</p>}
                 {tool === "qq" && m.qq.localWork && (
                   <p className="text-sm text-muted-foreground">
