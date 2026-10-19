@@ -81,6 +81,8 @@ export class ApiError extends Error {
     readonly changed = false,
     // A newer plan request than this one reached qq-setup first.
     readonly superseded = false,
+    // qq-setup cannot install on this machine's system (Windows).
+    readonly unsupported = false,
   ) {
     super(message);
   }
@@ -116,7 +118,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const error = body && typeof body === "object" && "error" in body ? String((body as { error: unknown }).error) : null;
   if (!res.ok || error) {
     const flag = (k: string) => !!body && typeof body === "object" && k in body && (body as Record<string, unknown>)[k] === true;
-    throw new ApiError(error ?? `qq-setup answered ${res.status}. Is it still running in your terminal?`, res.status, flag("changed"), flag("superseded"));
+    throw new ApiError(error ?? `qq-setup answered ${res.status}. Is it still running in your terminal?`, res.status, flag("changed"), flag("superseded"), flag("unsupported"));
   }
   return body as T;
 }

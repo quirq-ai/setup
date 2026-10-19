@@ -593,6 +593,43 @@ test("this machine: the form cannot close under a run, and no run starts once th
   }
 });
 
+test("this machine: on Windows the page says plainly that qq-setup cannot install qq or xo there", async ({ browser }) => {
+  // The CLI believes it runs on Windows; HOME is still an absolute POSIX path, so only the platform turns the panel off.
+  const asWindows = "data:text/javascript,Object.defineProperty(process,'platform',{value:'win32'})";
+  const cli = await startCli({ NODE_OPTIONS: `--import=${asWindows}` });
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  try {
+    await page.goto(cli.url);
+    await expect(page.getByText("qq-setup cannot install qq or xo on Windows", { exact: true })).toBeVisible();
+    await expect(page.getByText(/install Node 22 or newer inside WSL, then run the same command there/)).toBeVisible();
+    // Not the destructive alert: nothing on this PC is broken.
+    await expect(page.locator("[data-slot=alert]").filter({ hasText: "on Windows" })).not.toHaveClass(/text-destructive/);
+    // The terminal says the same.
+    expect(cli.output()).toContain("note  Windows: qq-setup installs qq and xo on Linux and macOS only.");
+    await expect(page.getByText(/HOME must be set/)).toHaveCount(0);
+    await expect(page.getByText("Could not look at this machine")).toHaveCount(0);
+    // Nothing else on the page tells a Windows user to install here, and what qq and xo are is still there.
+    await expect(page.getByText(/cannot install qq or xo on Windows \(step 1 says why\)/)).toBeVisible();
+    await expect(page.getByText(/First install qq on this machine/)).toHaveCount(0);
+    await expect(page.getByText(/after you press Run/)).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "1. qq and xo on this machine", exact: true })).toBeVisible();
+    for (const name of ["What is qq?", "What is xo?"]) await expect(page.getByRole("button", { name, exact: true })).toBeVisible();
+    // Step 2 still works: the org and its repos are listed.
+    await expect(page.getByText("billing-api", { exact: true })).toBeAttached();
+    const plan = await callApi(page, "/api/machine/plan", { qq: "install", seen: "" });
+    expect(plan.status).toBe(409);
+    expect(plan.body.error).toMatch(/shell commands for Linux and macOS/);
+    const start = await callApi(page, "/api/machine/run", { key: "x" });
+    expect(start.status).toBe(409);
+    expect(start.body.error).toMatch(/shell commands for Linux and macOS/);
+    mkdirSync(SHOTS, { recursive: true });
+    await page.screenshot({ path: join(SHOTS, "windows-390.png"), fullPage: true });
+  } finally {
+    cli.proc.kill();
+    await page.close();
+  }
+});
+
 test("this machine: with a relative HOME the panel offers nothing", async ({ browser }) => {
   const cli = await startCli({ HOME: "relative-home" });
   const page = await browser.newPage();

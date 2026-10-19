@@ -206,17 +206,23 @@ export function SetupForm() {
 
   const go = (to: React.RefObject<HTMLElement | null>) => to.current?.scrollIntoView({ behavior: "smooth", block: "start" });
 
+  // qq-setup's machine steps are Linux and macOS only (cli/bin.mjs): on Windows the page says so.
+  const windows = state?.platform === "win32";
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
         <h1 className="font-display text-2xl">Set up qq</h1>
         <p className="text-muted-foreground">
-          First install qq on this machine (and xo, if you want it), then put your org&apos;s repos under qq.
+          {windows
+            ? "qq-setup cannot install qq or xo on Windows (step 1 says why), but you can still put your org's repos under qq."
+            : "First install qq on this machine (and xo, if you want it), then put your org's repos under qq."}
         </p>
         <AboutTogether />
         {state?.readOnly && (
           <p className="text-sm text-muted-foreground">
-            It changes nothing on GitHub. On this machine it runs only the steps you pick, after you press Run.
+            It changes nothing on GitHub.
+            {!windows && " On this machine it runs only the steps you pick, after you press Run."}
           </p>
         )}
       </div>
@@ -252,7 +258,7 @@ export function SetupForm() {
       {state && (
         <section ref={machineRef} aria-labelledby="step-machine" className="flex scroll-mt-24 flex-col gap-6">
           <h2 id="step-machine" className="font-display text-xl">
-            1. Install, update or remove qq and xo on this machine
+            {windows ? "1. qq and xo on this machine" : "1. Install, update or remove qq and xo on this machine"}
           </h2>
           {hasQq === false && (
             <Alert>

@@ -42,7 +42,9 @@ terminal as [`install`](#install-update-or-remove-qq-and-xo).
      starts at Keep (or Don't install), so nothing is installed or removed until you pick it. It
      shows the exact commands for what you picked, and Run runs them here, as you, with their
      output on the page and in the terminal. Removing qq offers its demo folders and its
-     `QQ_PYTHON` line as unticked boxes. "Done: close qq-setup" stops the command.
+     `QQ_PYTHON` line as unticked boxes. "Done: close qq-setup" stops the command. qq-setup
+     installs qq and xo on Linux and macOS only: on Windows this step says so and points to WSL (with
+     Node 22 or newer installed inside it; not tested there), and step 2 still works.
    - **2. Set up repos in an org you own** (the terminal then does 3 and 4 below). You pick an org you own, the repos to put under qq and, optionally, a new starter repo.
    Without a `gh` login, or with no org you own, this step says what to fix instead.
    A repo is offered only when it can run its qq kind's commands as they are: Python service

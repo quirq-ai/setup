@@ -11,7 +11,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Spinner } from "@/components/ui/spinner";
 import { AboutQq, AboutXo } from "@/components/about";
 import { Command } from "@/components/command";
-import { api, type ApiError, type Action, type Choice, type Machine, type MachineTool, type Plan, type Progress } from "@/lib/api";
+import { api, ApiError, type Action, type Choice, type Machine, type MachineTool, type Plan, type Progress } from "@/lib/api";
 
 type Tool = "qq" | "xo";
 type Run = NonNullable<Progress["run"]>;
@@ -39,6 +39,7 @@ export function MachinePanel({ onDone, onLook, held }: {
   // The plan, with the choice it was made for: a plan for an older choice is never shown or run.
   const [planned, setPlanned] = useState<{ key: string; plan: Plan } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [unsupported, setUnsupported] = useState(false);
   // Why the last Run was refused or failed to start; kept while the page looks at the machine again.
   const [runError, setRunError] = useState<string | null>(null);
   const [run, setRun] = useState<Run | null>(null);
@@ -93,7 +94,7 @@ export function MachinePanel({ onDone, onLook, held }: {
     let live = true;
     api.machine().then(
       (s) => live && show(s),
-      (e: Error) => live && setError(e.message),
+      (e: Error) => live && (setUnsupported(e instanceof ApiError && e.unsupported), setError(e.message)),
     );
     return () => {
       live = false;
@@ -141,11 +142,20 @@ export function MachinePanel({ onDone, onLook, held }: {
 
   if (!m || !choice) {
     return error ? (
-      <Alert variant="destructive" role="alert">
-        <TriangleAlert />
-        <AlertTitle>Could not look at this machine</AlertTitle>
-        <AlertDescription>{error}</AlertDescription>
-      </Alert>
+      <div className="flex flex-col gap-3">
+        <Alert variant={unsupported ? "default" : "destructive"} role="alert">
+          <TriangleAlert />
+          <AlertTitle>{unsupported ? "qq-setup cannot install qq or xo on Windows" : "Could not look at this machine"}</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+        {/* What the tools are still matters here, before setting up WSL. */}
+        {unsupported && (
+          <>
+            <AboutQq />
+            <AboutXo />
+          </>
+        )}
+      </div>
     ) : (
       <p className="flex items-center gap-2 text-muted-foreground">
         <Spinner /> Looking at what is installed…
