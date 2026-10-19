@@ -11,9 +11,9 @@ export function AboutQq() {
         You write code the way you always do, by hand or with an agent. qq then:
       </p>
       <ul className="flex list-disc flex-col gap-1 pl-5">
-        <li>builds and tests it the same way on your laptop and on GitHub;</li>
+        <li>builds and tests it the same way on your laptop and on GitHub (Linux today; a Mac uses toolchains you install);</li>
         <li>decides whether it may land, and keeps <code className="font-mono">main</code> green;</li>
-        <li>moves tested commits out to a release channel.</li>
+        <li>moves tested commits out to a release channel (so far for quirq&apos;s own products, not yet an org set up here).</li>
       </ul>
       <p className="text-muted-foreground">
         qqsync, installed with it, reads each repo&apos;s manifest, <code className="font-mono">infra/repo.toml</code>, which pins
@@ -33,11 +33,11 @@ export function AboutXo() {
       </p>
       <ul className="flex list-disc flex-col gap-1 pl-5">
         <li>
-          <code className="font-mono">xo login</code> saves your XO API key, which the XO team gives you;
+          <code className="font-mono">xo login</code> saves your XO API key, which the XO team gives you, and signs gh in to GitHub if needed;
         </li>
         <li>
           <code className="font-mono">xo create space NAME KIND</code> creates a space on XO Cloud, such as a Claude Code or
-          Codex space;
+          Codex space (it stores your key in the space);
         </li>
         <li>
           <code className="font-mono">xo status</code> shows where you are logged in.
@@ -48,19 +48,24 @@ export function AboutXo() {
   );
 }
 
-export function AboutOrgSetup() {
+export function AboutOrgSetup({ readOnly }: { readOnly: boolean }) {
   return (
     <LearnMore title="What does setting up repos do?">
-      <p>For the org you pick, setup would:</p>
+      <p>For the org you pick, setup {readOnly ? "would" : "will"}:</p>
       <ul className="flex list-disc flex-col gap-1 pl-5">
         <li>
           create a config repo, <code className="font-mono">qq-config</code>;
         </li>
         <li>open a pull request in each repo with its qq manifest and generated workflows;</li>
-        <li>turn on the merge queue, so every change is tested as it will land.</li>
+        <li>
+          protect each repo&apos;s default branch: changes land only through the merge queue, tested as they will land, once
+          presubmit passes, with no bypass.
+        </li>
       </ul>
-      <p className="text-muted-foreground">Today it only shows that plan in your terminal: it changes nothing on GitHub.</p>
-      <GuideLink href="https://docs.quirq.dev/docs/add-a-repo">Add a repo to qq</GuideLink>
+      {readOnly && (
+        <p className="text-muted-foreground">Today it only shows that plan in your terminal: it changes nothing on GitHub.</p>
+      )}
+      <GuideLink href="https://docs.quirq.dev/docs/add-a-repo#onboarding-repos-in-your-own-org">Put a repo on qq</GuideLink>
     </LearnMore>
   );
 }

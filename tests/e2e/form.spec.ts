@@ -257,7 +257,7 @@ const LEARN = [
   { title: "How qq and xo fit together", href: null },
   { title: "What is qq?", href: "https://docs.quirq.dev/docs" },
   { title: "What is xo?", href: "https://github.com/quirq-ai/xo/blob/main/docs/quickstart.md" },
-  { title: "What does setting up repos do?", href: "https://docs.quirq.dev/docs/add-a-repo" },
+  { title: "What does setting up repos do?", href: "https://docs.quirq.dev/docs/add-a-repo#onboarding-repos-in-your-own-org" },
 ] as const;
 
 for (const scheme of ["light", "dark"] as const) {
@@ -316,6 +316,31 @@ for (const scheme of ["light", "dark"] as const) {
     });
   }
 }
+
+test("learn more: step 2 says it changes nothing on GitHub only while the terminal says so", async ({ browser }) => {
+  const cli = await startCli();
+  const page = await browser.newPage();
+  const today = "Today it only shows that plan in your terminal: it changes nothing on GitHub.";
+  try {
+    await page.goto(cli.url);
+    await page.getByRole("button", { name: "What does setting up repos do?", exact: true }).click();
+    await expect(page.getByText(today)).toBeVisible();
+    await expect(page.getByText(/For the org you pick, setup would:/)).toBeVisible();
+    await expect(page.getByText(/changes land only through the merge queue.*with no bypass/)).toBeVisible();
+    // A version that writes to GitHub (readOnly false) must not keep the line.
+    await page.route("**/api/state", async (route) => {
+      const res = await route.fetch();
+      await route.fulfill({ response: res, json: { ...(await res.json()), readOnly: false } });
+    });
+    await page.reload();
+    await page.getByRole("button", { name: "What does setting up repos do?", exact: true }).click();
+    await expect(page.getByText(/For the org you pick, setup will:/)).toBeVisible();
+    await expect(page.getByText(today)).toHaveCount(0);
+  } finally {
+    cli.proc.kill();
+    await page.close();
+  }
+});
 
 /** Where an element ends, in the viewport. */
 async function bottom(el: Locator): Promise<number> {

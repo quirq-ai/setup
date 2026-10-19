@@ -270,7 +270,7 @@ export function SetupForm() {
           <h2 id="step-repos" className="font-display text-xl">
             2. Set up repos in an org you own
           </h2>
-          <AboutOrgSetup />
+          <AboutOrgSetup readOnly={state.readOnly} />
           {hasQq === false && (
             <p className="text-sm text-muted-foreground">qq is not on this machine yet: install it in step 1 first.</p>
           )}
