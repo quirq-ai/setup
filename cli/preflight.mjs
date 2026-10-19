@@ -76,7 +76,7 @@ export function checks(seen) {
     out.push({ name: "macOS", ok: true, fatal: false,
       detail: `setup works here. ${MAC}` });
   } else if (seen.platform === "win32") {
-    out.push({ name: "Windows", ok: false, fatal: false, detail: "not tested on Windows; use WSL if anything fails" });
+    out.push({ name: "Windows", ok: false, fatal: false, detail: "qq and xo install on Linux and macOS only: to install them, run this command in WSL" });
   }
   return out;
 }

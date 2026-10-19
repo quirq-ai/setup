@@ -125,10 +125,15 @@ async function main(argv = process.argv.slice(2)) {
   let traded = false;
   let refused = 0;
   const home = process.env.HOME ?? "";
-  // The machine steps act on ~: with no absolute HOME the panel offers nothing (cli/install.mjs refuses too).
-  const here = home.startsWith("/") ? machine({ home, env: process.env, platform: process.platform,
+  const windows = process.platform === "win32";
+  // The machine steps are sh commands that act on ~: on Windows, or with no absolute HOME, the panel
+  // offers nothing (cli/install.mjs refuses both too).
+  const here = !windows && home.startsWith("/") ? machine({ home, env: process.env, platform: process.platform,
     echo: (t) => process.stdout.write(t) }) : null;
-  const noHome = { error: "HOME must be set to an absolute path for qq-setup to install anything" };
+  const noHome = windows
+    ? { error: "qq and xo install on Linux and macOS only. " +
+        "To install them on this PC, run the same command in WSL, which gives Windows a Linux terminal.", unsupported: true }
+    : { error: "HOME must be set to an absolute path for qq-setup to install anything" };
   const form = await startServer({
     root: join(ROOT, "out"),
     port,

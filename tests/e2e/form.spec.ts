@@ -593,6 +593,33 @@ test("this machine: the form cannot close under a run, and no run starts once th
   }
 });
 
+test("this machine: on Windows the page says plainly that qq and xo do not install there", async ({ browser }) => {
+  // The CLI believes it runs on Windows; HOME is still an absolute scratch folder, as Git Bash sets it.
+  const asWindows = "data:text/javascript,Object.defineProperty(process,'platform',{value:'win32'})";
+  const cli = await startCli({ NODE_OPTIONS: `--import=${asWindows}` });
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  try {
+    await page.goto(cli.url);
+    await expect(page.getByText("qq and xo do not install on Windows", { exact: true })).toBeVisible();
+    await expect(page.getByText(/run the same command in WSL/)).toBeVisible();
+    await expect(page.getByText(/HOME must be set/)).toHaveCount(0);
+    await expect(page.getByText("Could not look at this machine")).toHaveCount(0);
+    // Step 2 still works: the org and its repos are listed.
+    await expect(page.getByText("billing-api", { exact: true })).toBeAttached();
+    const plan = await callApi(page, "/api/machine/plan", { qq: "install", seen: "" });
+    expect(plan.status).toBe(409);
+    expect(plan.body.error).toMatch(/install on Linux and macOS only/);
+    const start = await callApi(page, "/api/machine/run", { key: "x" });
+    expect(start.status).toBe(409);
+    expect(start.body.error).toMatch(/install on Linux and macOS only/);
+    mkdirSync(SHOTS, { recursive: true });
+    await page.screenshot({ path: join(SHOTS, "windows-390.png"), fullPage: true });
+  } finally {
+    cli.proc.kill();
+    await page.close();
+  }
+});
+
 test("this machine: with a relative HOME the panel offers nothing", async ({ browser }) => {
   const cli = await startCli({ HOME: "relative-home" });
   const page = await browser.newPage();
