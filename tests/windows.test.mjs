@@ -15,7 +15,7 @@ test("windows: Windows' Node started from a WSL folder is told apart from a plai
 test("windows: in WSL the note says it ran Windows' Node and how to check, never to go and use WSL", () => {
   const note = windowsNote("\\\\wsl.localhost\\Ubuntu\\home\\surshar");
   assert.match(note, /^This is a WSL terminal, but it ran Windows' Node/);
-  assert.match(note, /Install Node 22 or newer inside WSL, open a new WSL terminal, check that `which node` prints a path that does not start with \/mnt\/c/);
+  assert.match(note, /Install Node 22 or newer inside WSL, open a new WSL terminal, check that `which npx` prints a path that does not start with \/mnt\/c/);
   assert.doesNotMatch(note, /To try them on this PC, use WSL/);
 });
 

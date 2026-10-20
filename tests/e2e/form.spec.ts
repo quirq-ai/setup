@@ -641,7 +641,7 @@ test("this machine: Windows' Node started in WSL is told so, not sent back to WS
   try {
     await page.goto(cli.url);
     await expect(page.getByText(/^This is a WSL terminal, but it ran Windows' Node/)).toBeVisible();
-    await expect(page.getByText(/`which node` prints a path that does not start with \/mnt\/c/)).toBeVisible();
+    await expect(page.getByText(/`which npx` prints a path that does not start with \/mnt\/c/)).toBeVisible();
     await expect(page.getByText(/To try them on this PC, use WSL/)).toHaveCount(0);
     expect(cli.output()).toContain("note  Windows: qq-setup installs qq and xo on Linux and macOS only. This is a WSL terminal");
     mkdirSync(SHOTS, { recursive: true });

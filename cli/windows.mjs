@@ -3,13 +3,15 @@
 // A common trap: in WSL with no Linux Node, the shell finds Windows' npx, because WSL adds Windows' PATH
 // by default, so qq-setup runs on Windows' Node. Its folder then reads \\wsl.localhost\<distro>\... (or
 // \\wsl$\... on older WSL), or C:\... when started under /mnt/c.
+// Windows' Node folder has node.exe but no file named node, and WSL's shell does not add .exe, so in WSL
+// `which node` prints nothing there; `which npx` finds Windows' npx (a sh script), under /mnt/c.
 
 /** Whether Windows' Node was started from a WSL folder. @param {string} cwd */
 export function fromWsl(cwd) {
   return /^\\\\wsl(\$|\.localhost)\\/i.test(cwd);
 }
 
-const CHECK = "check that `which node` prints a path that does not start with /mnt/c";
+const CHECK = "check that `which npx` prints a path that does not start with /mnt/c";
 
 /** The one explanation, for the page, `install` and the terminal note. @param {string} cwd */
 export function windowsNote(cwd) {
