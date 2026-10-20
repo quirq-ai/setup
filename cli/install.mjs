@@ -426,7 +426,7 @@ export function planSteps(actions, state, { python, platform, git, demo = [], py
   const xo = freshXo(actions, state);
   // xo's update reinstalls from a git+https spec, so it needs git too.
   if ((qq || xo || actions.xo === "update") && !git) {
-    return { steps, stop: `git is needed to ${qq ? "install qq" : "install or update xo"} and is not installed${platform === "darwin" ? " (on a Mac: xcode-select --install)" : ""}` };
+    return { steps, stop: `git is needed to ${qq ? "install qq" : "install or update xo"} and is not installed${platform === "darwin" ? " (on a Mac: xcode-select --install)" : " (on Linux: install it with your package manager, such as sudo apt install git)"}` };
   }
   if ((qq || xo) && !python.ok) {
     const floor = pythonFloor(actions).join(".").replace(/\.0$/, "");
@@ -510,7 +510,8 @@ export function choices(t) {
 export async function prepare(actions, state, { demo, pythonLine = false, env, platform, run }) {
   const needs = usesQq(actions) || freshXo(actions, state);
   const python = needs ? await pickPython(env, pythonFloor(actions), run, platform) : { cmd: null, version: null, ok: true, persist: false };
-  const git = !needs || (await run("git", ["--version"], env)) !== null;
+  // xo's update reinstalls from a git+https spec, so it needs git even when it needs no Python.
+  const git = !(needs || actions.xo === "update") || (await run("git", ["--version"], env)) !== null;
   const { steps, stop } = planSteps(actions, state, { python, platform, git, demo, pythonLine });
   const py = python.ok ? python.cmd : platform === "darwin" ? "python3.13" : null;
   return { steps, stop, python, env: py ? { ...env, QQ_PYTHON: py } : env };
@@ -765,7 +766,7 @@ export async function main(argv, io = realIo()) {
       }
     }
     out(windows ? "\nDone. Open a new terminal so PATH takes effect." : "\nDone. Open a new terminal so PATH (and QQ_PYTHON) take effect.");
-    if (actions.xo === "install") out("Then log xo in:  xo login  (it opens your browser to sign in to XO, or asks for your XO API key)");
+    if (actions.xo === "install") out("Then log xo in:  xo login  (it opens your browser to sign in to XO; xo login --key asks for your XO API key instead)");
     for (const line of afterNotes(actions, home)) out(line);
     return 0;
   } finally {

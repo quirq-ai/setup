@@ -168,7 +168,7 @@ export function machine({ home, env, platform, run = read, runStep: step = piped
         }
         r.code = 0;
         r.notes = afterNotes({ qq: kept.choice.qq, xo: kept.choice.xo }, home);
-        if (kept.choice.xo === "install") r.notes.push("Open a new terminal, then log xo in:  xo login  (it opens your browser to sign in to XO, or asks for your XO API key)");
+        if (kept.choice.xo === "install") r.notes.push("Open a new terminal, then log xo in:  xo login  (it opens your browser to sign in to XO; xo login --key asks for your XO API key instead)");
       } catch (e) {
         add(`\n${e instanceof Error ? e.message : String(e)}\n`);
         r.code = 2;

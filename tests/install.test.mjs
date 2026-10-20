@@ -604,6 +604,24 @@ test("main: removing says when a PATH line written another way is left", async (
   assert.ok(r.out.includes("~/.zshrc still has a line naming .xo/bin; delete it yourself."));
 });
 
+test("main: updating an installed xo looks for git, and stops before any step without it", async () => {
+  // pip reinstalls from git+https, so the update needs git even though it picks no Python.
+  const base = fakeRun();
+  const noGit = async (/** @type {string} */ f, /** @type {string[]} */ a) => (f === "git" && a[0] === "--version" ? null : base(f, a));
+  const home = fakeHome();
+  writeFileSync(join(home, ".zshrc"), `export PATH="$HOME/qq-tools/bin:$PATH"\n${XO_PATH_LINE}\n`);
+  const r = await drive(["--only", "xo", "--update", "--yes"], { home, tty: false, run: noGit });
+  assert.equal(r.code, 1);
+  assert.deepEqual(r.steps, []);
+  assert.match(r.out.join("\n"), /qq-setup install: git is needed to install or update xo and is not installed \(on Linux: /);
+  assert.deepEqual((await drive(["--only", "xo", "--update", "--yes"], { home, tty: false })).steps, [XO.update.cmd]);
+  const win = winHome();
+  const w = await drive(["--only", "xo", "--update", "--yes"], { home: win, platform: "win32", env: { USERPROFILE: win }, run: winRun({ git: false }) });
+  assert.equal(w.code, 1);
+  assert.deepEqual(w.steps, []);
+  assert.match(w.out.join("\n"), /git is needed to install or update xo and is not installed \(on Windows: https:\/\/git-scm\.com\/downloads\/win \)/);
+});
+
 test("main: on a Mac with no new enough Python, brew's python3.13 is what the steps get", async () => {
   const home = mkdtempSync(join(tmpdir(), "qq-setup-mac-"));
   const r = await drive(["--yes", "--only", "qq"], { home, platform: "darwin", tty: false,
