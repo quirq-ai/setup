@@ -1,6 +1,6 @@
-# The xo commands in quirq-ai/xo docs/quickstart.md at 262f3749a088fcab705f2b6398b274718e4a46c4,
+# The xo commands in quirq-ai/xo docs/quickstart.md at f35ded98f8c91f38ca99a557487d257985efda98,
 # lines 18, 102, 110 and 111, copied unchanged (line 18 without its two-space indent). cli/install.mjs must match these; update both together.
-&& ~/.xo/bin/pip install "quirq-xo @ git+https://github.com/quirq-ai/xo@b61bc4cac605679c2a97def9b64ef56456cb0827" \
+&& ~/.xo/bin/pip install "quirq-xo @ git+https://github.com/quirq-ai/xo@436bfbef0d222c128bd10d3ae6b32bc407ce1b51" \
 ~/.xo/bin/pip install --force-reinstall --no-deps "quirq-xo @ git+https://github.com/quirq-ai/xo@NEW_SHA"
 xo logout
 rm -rf ~/.xo
