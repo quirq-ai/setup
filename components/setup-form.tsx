@@ -98,7 +98,9 @@ export function SetupForm() {
 
   // qq first: when the first look finds no qq, take the reader to the install step.
   const looked = useCallback((m: Machine) => {
-    // A broken install counts as there: its panel offers Reinstall, with its own line.
+    // A broken install counts as there: its panel offers Reinstall, with its own line. With no choices
+    // (Windows), qq is not this machine's to install, so nothing points at it.
+    if (!m.qq.choices.length) return setHasQq(null);
     const here = m.qq.installed || m.qq.broken;
     setHasQq((was) => {
       if (was === null && !here) machineRef.current?.scrollIntoView({ block: "start" });
@@ -206,7 +208,7 @@ export function SetupForm() {
 
   const go = (to: React.RefObject<HTMLElement | null>) => to.current?.scrollIntoView({ behavior: "smooth", block: "start" });
 
-  // qq-setup's machine steps are Linux and macOS only (cli/main.mjs): on Windows the page says so.
+  // On Windows qq-setup installs xo only (qq runs on Linux and macOS): step 1 says so.
   const windows = state?.platform === "win32";
 
   return (
@@ -215,14 +217,14 @@ export function SetupForm() {
         <h1 className="font-display text-2xl">Set up qq</h1>
         <p className="text-muted-foreground">
           {windows
-            ? "qq-setup cannot install qq or xo on Windows (step 1 says why), but you can still put your org's repos under qq."
+            ? "On Windows qq-setup installs xo; qq runs on Linux and macOS (step 1 says how to get it on this PC). You can still put your org's repos under qq."
             : "First install qq on this machine (and xo, if you want it), then put your org's repos under qq."}
         </p>
         <AboutTogether />
         {state?.readOnly && (
           <p className="text-sm text-muted-foreground">
             It changes nothing on GitHub.
-            {!windows && " On this machine it runs only the steps you pick, after you press Run."}
+            {" On this machine it runs only the steps you pick, after you press Run."}
           </p>
         )}
       </div>
@@ -258,7 +260,7 @@ export function SetupForm() {
       {state && (
         <section ref={machineRef} aria-labelledby="step-machine" className="flex scroll-mt-24 flex-col gap-6">
           <h2 id="step-machine" className="font-display text-xl">
-            {windows ? "1. qq and xo on this machine" : "1. Install, update or remove qq and xo on this machine"}
+            {windows ? "1. Install, update or remove xo on this machine" : "1. Install, update or remove qq and xo on this machine"}
           </h2>
           {hasQq === false && (
             <Alert>

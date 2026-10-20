@@ -155,3 +155,183 @@ jobs:
           code=0; out=$(node cli/bin.mjs --version 2>&1) || code=$?
           want="qq-setup needs Node 22 or newer, and this is Node $(node -p process.versions.node)."
           [ "$code" = 1 ] && [ "$(printf '%s\n' "$out" | head -1)" = "$want" ] || { printf '%s\n' "$out"; echo "::error::exit $code"; exit 1; }
+
+  # xo on native Windows, from cmd, for real: the steps qq-setup's install plans there (a venv in
+  # %USERPROFILE%\.xo, its Scripts folder on the user PATH), then remove. The runner has python and git.
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      # A user PATH entry stored with a %VAR% in it, and with "xo" in its name, must stay as it is after
+      # the install and the remove.
+      - name: Seed the user PATH
+        shell: pwsh
+        run: |
+          $k = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
+          $old = [string]$k.GetValue('Path', '', 'DoNotExpandEnvironmentNames')
+          $k.SetValue('Path', (@($old -split ';' | Where-Object { $_ }) + '%USERPROFILE%\qq-ci-xo-keep') -join ';', 'ExpandString')
+
+      - name: Install xo
+        shell: cmd
+        run: node cli/bin.mjs install --only xo --yes
+
+      - name: xo runs and is on the user PATH
+        shell: pwsh
+        run: |
+          & "$env:USERPROFILE\.xo\Scripts\xo.exe" --version
+          if ($LASTEXITCODE -ne 0) { throw "xo.exe did not run" }
+          $k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment')
+          $p = [string]$k.GetValue('Path', '', 'DoNotExpandEnvironmentNames')
+          Write-Output $p
+          $d = Join-Path $env:USERPROFILE '.xo\Scripts'
+          if (@($p -split ';') -notcontains $d) { throw "the user PATH lacks $d" }
+          if (@($p -split ';') -notcontains '%USERPROFILE%\qq-ci-xo-keep') { throw "the user PATH lost an unexpanded entry" }
+          if ([string]$k.GetValueKind('Path') -ne 'ExpandString') { throw "the user PATH is no longer an ExpandString" }
+
+      - name: A second install finds xo and changes nothing
+        shell: pwsh
+        run: |
+          $out = node cli/bin.mjs install --only xo --yes | Out-String
+          Write-Output $out
+          if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" }
+          if ($out -notmatch 'Nothing to do\.') { throw "the second install planned steps" }
+
+      # xo logout must delete them: they are where xo keeps its key on Windows (client.py credentials_path).
+      - name: Give xo key files to delete
+        shell: pwsh
+        run: |
+          $c = Join-Path $env:USERPROFILE '.config\xo'
+          New-Item -ItemType Directory -Force -Path $c | Out-Null
+          foreach ($f in 'credentials', 'services') { Set-Content -LiteralPath (Join-Path $c $f) -Value 'x' }
+
+      - name: Remove xo
+        shell: cmd
+        run: node cli/bin.mjs install --only xo --remove --yes
+
+      - name: xo, its key files and its PATH entry are gone
+        shell: pwsh
+        run: |
+          if (Test-Path "$env:USERPROFILE\.xo") { throw "$env:USERPROFILE\.xo is still there" }
+          foreach ($f in 'credentials', 'services') { if (Test-Path "$env:USERPROFILE\.config\xo\$f") { throw "xo logout left $f" } }
+          $k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment')
+          $p = [string]$k.GetValue('Path', '', 'DoNotExpandEnvironmentNames')
+          Write-Output $p
+          if ($p -match '\\\.xo\\Scripts') { throw "the user PATH still has xo" }
+          if (@($p -split ';') -notcontains '%USERPROFILE%\qq-ci-xo-keep') { throw "the user PATH lost an unexpanded entry" }
+          if ([string]$k.GetValueKind('Path') -ne 'ExpandString') { throw "the user PATH is no longer an ExpandString" }
+
+      # A broken xo (its venv without xo.exe) in a profile folder named with a space, ( ) and &: the logout
+      # step deletes the key files itself, in %XDG_CONFIG_HOME%\xo when that is set, and no folder name
+      # breaks a cmd.exe line.
+      - name: Remove a broken xo from an odd profile folder
+        shell: pwsh
+        run: |
+          foreach ($xdg in '', (Join-Path $env:RUNNER_TEMP 'xdg (c) & d')) {
+            $home2 = Join-Path $env:RUNNER_TEMP 'qq ci (a) & b'
+            New-Item -ItemType Directory -Force -Path (Join-Path $home2 '.xo') | Out-Null
+            Set-Content -LiteralPath (Join-Path $home2 '.xo\pyvenv.cfg') -Value 'home = C:\nowhere'
+            $keys = if ($xdg) { Join-Path $xdg 'xo' } else { Join-Path $home2 '.config\xo' }
+            New-Item -ItemType Directory -Force -Path $keys | Out-Null
+            foreach ($f in 'credentials', 'services') { Set-Content -LiteralPath (Join-Path $keys $f) -Value 'x' }
+            $env:USERPROFILE = $home2
+            $env:XDG_CONFIG_HOME = $xdg
+            node cli/bin.mjs install --only xo --remove --yes
+            if ($LASTEXITCODE -ne 0) { throw "remove exited $LASTEXITCODE" }
+            foreach ($f in 'credentials', 'services') { if (Test-Path -LiteralPath (Join-Path $keys $f)) { throw "$keys\$f is still there" } }
+            if (Test-Path -LiteralPath (Join-Path $home2 '.xo')) { throw "$home2\.xo is still there" }
+          }
+
+      # cmd.exe with DelayedExpansion on (a registry setting /d does not turn off) would eat the ! in this
+      # folder name and delete or check the wrong folder; the steps run with /v:off.
+      - name: Remove a broken xo from a profile folder with ! in it, with DelayedExpansion on
+        shell: pwsh
+        run: |
+          $cp = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Software\Microsoft\Command Processor')
+          $cp.SetValue('DelayedExpansion', 1, 'DWord')
+          try {
+            $home2 = Join-Path $env:RUNNER_TEMP 'qq ci !x! y'
+            New-Item -ItemType Directory -Force -Path (Join-Path $home2 '.xo') | Out-Null
+            Set-Content -LiteralPath (Join-Path $home2 '.xo\pyvenv.cfg') -Value 'home = C:\nowhere'
+            $env:USERPROFILE = $home2
+            node cli/bin.mjs install --only xo --remove --yes
+            if ($LASTEXITCODE -ne 0) { throw "remove exited $LASTEXITCODE" }
+            if (Test-Path -LiteralPath (Join-Path $home2 '.xo')) { throw "$home2\.xo is still there" }
+          } finally {
+            $cp.DeleteValue('DelayedExpansion')
+          }
+
+      # A running xo (xo serve) holds Scripts\xo.exe: rmdir deletes the rest, pyvenv.cfg too, and may still
+      # exit 0. The remove must fail there, with the PATH entry still on and no "Done"; once xo.exe is free,
+      # the retry must still see xo's folder (not a foreign one), delete it and take the PATH entry off.
+      - name: Removing xo while xo.exe is in use fails, then the retry finishes it
+        shell: pwsh
+        run: |
+          $home2 = Join-Path $env:RUNNER_TEMP 'qq ci locked'
+          New-Item -ItemType Directory -Force -Path (Join-Path $home2 '.xo\Scripts') | Out-Null
+          Set-Content -LiteralPath (Join-Path $home2 '.xo\pyvenv.cfg') -Value 'home = C:\nowhere'
+          Set-Content -LiteralPath (Join-Path $home2 '.xo\Scripts\xo.exe') -Value 'not a program'
+          $env:USERPROFILE = $home2
+          $d = Join-Path $home2 '.xo\Scripts'
+          $k = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
+          $before = [string]$k.GetValue('Path', '', 'DoNotExpandEnvironmentNames')
+          $k.SetValue('Path', (@($before -split ';' | Where-Object { $_ }) + $d) -join ';', 'ExpandString')
+          $onPath = { @(([string]$k.GetValue('Path', '', 'DoNotExpandEnvironmentNames')) -split ';') -contains $d }
+          $held = [System.IO.File]::Open((Join-Path $d 'xo.exe'), 'Open', 'Read', 'None')
+          try {
+            $out = node cli/bin.mjs install --only xo --remove --yes | Out-String
+            Write-Output $out
+            if ($LASTEXITCODE -eq 0) { throw "remove exited 0 with xo.exe in use" }
+            if ($out -notmatch "xo's folder is still there") { throw "remove did not say why it stopped" }
+            if ($out -match 'Done\.') { throw "remove said Done" }
+            if (Test-Path -LiteralPath (Join-Path $home2 '.xo\pyvenv.cfg')) { throw "this test needs rmdir to have deleted pyvenv.cfg" }
+            if (-not (& $onPath)) { throw "the PATH entry went before the folder did" }
+          } finally {
+            $held.Close()
+          }
+          $out = node cli/bin.mjs install --only xo --remove --yes | Out-String
+          Write-Output $out
+          if ($LASTEXITCODE -ne 0) { throw "the retry exited $LASTEXITCODE" }
+          if ($out -match 'not an xo install') { throw "the retry called xo's folder foreign" }
+          if (Test-Path -LiteralPath (Join-Path $home2 '.xo')) { throw "$home2\.xo is still there" }
+          if (& $onPath) { throw "the retry left the PATH entry" }
+
+      # Windows looks in the current folder before PATH. Programs planted there under the names qq-setup
+      # uses (python, py, powershell, reg, cmd) must never run: it names them by full path.
+      - name: Programs planted in the current folder never run
+        shell: powershell
+        run: |
+          $plant = Join-Path $env:RUNNER_TEMP 'planted'
+          New-Item -ItemType Directory -Force -Path $plant | Out-Null
+          $src = 'public static class P { public static int Main(string[] a) { System.IO.File.AppendAllText(System.Environment.GetEnvironmentVariable("QQ_CI_MARK"), System.Environment.GetCommandLineArgs()[0] + "\n"); return 1; } }'
+          Add-Type -TypeDefinition $src -OutputAssembly (Join-Path $plant 'planted.exe') -OutputType ConsoleApplication
+          foreach ($n in 'python', 'py', 'powershell', 'reg', 'cmd') { Copy-Item (Join-Path $plant 'planted.exe') (Join-Path $plant "$n.exe") }
+          $env:QQ_CI_MARK = Join-Path $env:RUNNER_TEMP 'planted-ran.txt'
+          $home2 = Join-Path $env:RUNNER_TEMP 'qq ci planted'
+          New-Item -ItemType Directory -Force -Path (Join-Path $home2 '.xo') | Out-Null
+          Set-Content -LiteralPath (Join-Path $home2 '.xo\pyvenv.cfg') -Value 'home = C:\nowhere'
+          $keys = Join-Path $home2 '.config\xo'
+          New-Item -ItemType Directory -Force -Path $keys | Out-Null
+          Set-Content -LiteralPath (Join-Path $keys 'credentials') -Value 'x'
+          $env:USERPROFILE = $home2
+          Push-Location $plant
+          try {
+            node (Join-Path $env:GITHUB_WORKSPACE 'cli\bin.mjs') install --only xo --remove --yes
+            if ($LASTEXITCODE -ne 0) { throw "remove exited $LASTEXITCODE" }
+            node (Join-Path $env:GITHUB_WORKSPACE 'cli\bin.mjs') install --only xo --dry-run --yes
+            if ($LASTEXITCODE -ne 0) { throw "dry run exited $LASTEXITCODE" }
+          } finally {
+            Pop-Location
+          }
+          if (Test-Path -LiteralPath $env:QQ_CI_MARK) { Get-Content -LiteralPath $env:QQ_CI_MARK; throw "a planted program ran" }
+          if (Test-Path -LiteralPath (Join-Path $keys 'credentials')) { throw "the key file is still there" }
+          if (Test-Path -LiteralPath (Join-Path $home2 '.xo')) { throw "$home2\.xo is still there" }

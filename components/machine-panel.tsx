@@ -39,7 +39,6 @@ export function MachinePanel({ onDone, onLook, held }: {
   // The plan, with the choice it was made for: a plan for an older choice is never shown or run.
   const [planned, setPlanned] = useState<{ key: string; plan: Plan } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [unsupported, setUnsupported] = useState(false);
   // Why the last Run was refused or failed to start; kept while the page looks at the machine again.
   const [runError, setRunError] = useState<string | null>(null);
   const [run, setRun] = useState<Run | null>(null);
@@ -94,7 +93,7 @@ export function MachinePanel({ onDone, onLook, held }: {
     let live = true;
     api.machine().then(
       (s) => live && show(s),
-      (e: Error) => live && (setUnsupported(e instanceof ApiError && e.unsupported), setError(e.message)),
+      (e: Error) => live && setError(e.message),
     );
     return () => {
       live = false;
@@ -142,20 +141,11 @@ export function MachinePanel({ onDone, onLook, held }: {
 
   if (!m || !choice) {
     return error ? (
-      <div className="flex flex-col gap-3">
-        <Alert variant={unsupported ? "default" : "destructive"} role="alert">
-          <TriangleAlert />
-          <AlertTitle>{unsupported ? "qq-setup cannot install qq or xo on Windows" : "Could not look at this machine"}</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-        {/* What the tools are still matters here, before setting up WSL. */}
-        {unsupported && (
-          <>
-            <AboutQq />
-            <AboutXo />
-          </>
-        )}
-      </div>
+      <Alert variant="destructive" role="alert">
+        <TriangleAlert />
+        <AlertTitle>Could not look at this machine</AlertTitle>
+        <AlertDescription>{error}</AlertDescription>
+      </Alert>
     ) : (
       <p className="flex items-center gap-2 text-muted-foreground">
         <Spinner /> Looking at what is installed…
@@ -209,8 +199,10 @@ export function MachinePanel({ onDone, onLook, held }: {
                       </div>
                     ))}
                   </RadioGroup>
+                ) : tool === "qq" && m.qq.note ? (
+                  <p className="text-sm">{m.qq.note}</p>
                 ) : (
-                  <p className="text-sm">Move ~/.xo away to install xo here; qq-setup leaves it alone.</p>
+                  <p className="text-sm">Move the .xo folder in your home folder away to install xo here; qq-setup leaves it alone.</p>
                 )}
               </fieldset>
             );
