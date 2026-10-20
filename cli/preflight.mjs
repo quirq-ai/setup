@@ -6,7 +6,7 @@ import { execFile } from "node:child_process";
 import { TOKEN_VARS, whoami } from "./gh.mjs";
 import { MAC, MAC_PYTHON, qqPython } from "./tools.mjs";
 import { windowsNote } from "./windows.mjs";
-import { pythonHelp } from "./install.mjs";
+import { pickPython, pythonHelp, pythonOk } from "./install.mjs";
 
 /** What this read-only build needs: `gh auth login` grants both (with gist, which setup never uses). */
 export const NEEDED_SCOPES = ["repo", "read:org"];
@@ -21,7 +21,8 @@ export const LATER_SCOPES = ["workflow"];
  * Pure: turn what was observed into checks.
  * @param {{ node: string, platform: string, env: Record<string, string | undefined>, cwd?: string,
  *   git: string | null, gh: string | null, python: string | null, pythonCmd: string,
- *   login: string | null, scopes: string[] | null, loginError: string | null }} seen
+ *   login: string | null, scopes: string[] | null, loginError: string | null, newer?: string | null }} seen
+ *   newer: the Python qq-setup's install step would use when this one is too old, as "cmd (version)"
  * @returns {Check[]}
  */
 export function checks(seen) {
@@ -41,15 +42,15 @@ export function checks(seen) {
   out.push({ name: "gh", ok: !!seen.gh, fatal: true, detail: seen.gh ?? "gh (GitHub CLI) is not installed: https://cli.github.com" });
 
   // qq's launcher runs QQ_PYTHON, else python3, and refuses anything older than 3.11.4 (qq bin/qq:20-23);
-  // the setup step's qqcfg needs 3.11+. Check the one qq will run.
-  const py = seen.python ? /(\d+)\.(\d+)\.(\d+)/.exec(seen.python) : null;
-  const [maj, min, mic] = py ? py.slice(1).map(Number) : [0, 0, 0];
-  const pyOk = maj > 3 || (maj === 3 && (min > 11 || (min === 11 && mic >= 4)));
+  // the setup step's qqcfg needs 3.11+. Check the one qq will run. When it is too old, qq-setup's install
+  // step looks further (python3.14 to python3.11) and sets QQ_PYTHON to what it finds: seen.newer.
+  const pyOk = pythonOk(seen.python);
   out.push({ name: "Python 3.11.4+", ok: pyOk, fatal: false,
     detail: `${seen.python ?? "not found"} (${seen.pythonCmd}${seen.env.QQ_PYTHON ? ", from QQ_PYTHON" : ""})` +
       (pyOk ? "" : "; qq and the setup step need Python 3.11.4 or newer" +
-        (seen.platform === "darwin" ? `. macOS's python3 is 3.9: run  ${MAC_PYTHON.cmd}  then open a new terminal`
-          : `. ${pythonHelp({ cmd: seen.env.QQ_PYTHON || null, version: seen.python, ok: false, persist: false })}`)) });
+        (seen.newer ? `. qq-setup found ${seen.newer}: installing or updating qq here sets QQ_PYTHON to it`
+          : seen.platform === "darwin" ? `. macOS's python3 is 3.9: run  ${MAC_PYTHON.cmd}  then open a new terminal`
+            : `. ${pythonHelp({ cmd: seen.env.QQ_PYTHON || null, version: seen.python, ok: false, persist: false })}`)) });
 
   if (seen.gh && !setVars.length) {
     out.push({ name: "gh login", ok: !!seen.login, fatal: true,
@@ -110,6 +111,8 @@ export async function preflight() {
       if (/gh auth login|GH_TOKEN/.test(loginError)) loginError = "not logged in"; // the detail adds the fix
     }
   }
+  // What the install step would use instead, as it picks it (never past a QQ_PYTHON).
+  const newer = !process.env.QQ_PYTHON && !pythonOk(python) ? await pickPython(process.env, [3, 11, 4]) : null;
   return checks({ node: process.version, platform: process.platform, env: process.env, cwd: process.cwd(),
-    git, gh: ghv, python, pythonCmd, login, scopes, loginError });
+    git, gh: ghv, python, pythonCmd, login, scopes, loginError, newer: newer?.ok ? `${newer.cmd} (${newer.version})` : null });
 }

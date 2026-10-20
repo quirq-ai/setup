@@ -243,17 +243,21 @@ export async function pickPython(env, min, run = read) {
   return { cmd: null, version: first, ok: false, persist: false };
 }
 
-/** How to get a Python on Linux, where qq-setup does not install one: uv needs no sudo and gives a
- * current 3.13 on any distribution (Ubuntu 22.04's own python3.11 is 3.11.0, below qq's 3.11.4). */
-export const PYTHON_HELP = "https://docs.astral.sh/uv/guides/install-python/";
+/** How to get a Python on Linux, where qq-setup does not install one: uv needs no sudo and works on any
+ * distribution (Ubuntu 22.04's own python3.11 is 3.11.0, below qq's 3.11.4). The link is uv's install
+ * page; the version is named, because uv's own Python guide starts with `uv python install`, the newest
+ * Python (3.15 now), and qq-setup looks for python3.11 to python3.14 only. uv puts python3.13 in
+ * ~/.local/bin, which its installer puts on PATH for new terminals. */
+export const PYTHON_HELP = "https://docs.astral.sh/uv/getting-started/installation/";
+export const PYTHON_CMD = "uv python install 3.13";
 
 /**
  * What to do about a Python that is too old, after the version found.
  * @param {PythonPick} python  cmd is set only when QQ_PYTHON named it
  */
 export function pythonHelp(python) {
-  return `Install a newer one, for example Python 3.13 with uv ( ${PYTHON_HELP} ), open a new terminal, then run qq-setup's command again. ` +
-    (python.cmd ? `QQ_PYTHON is set to ${python.cmd}: point it at the new one.` : "qq-setup finds python3.11 to python3.14 by itself.");
+  return `Install Python 3.13 with uv, which needs no sudo: install uv ( ${PYTHON_HELP} ), open a new terminal, run  ${PYTHON_CMD}  then run qq-setup's command again. ` +
+    (python.cmd ? `QQ_PYTHON is set to ${python.cmd}: point it at python3.13.` : "qq-setup then finds python3.13 by itself.");
 }
 
 /** Write QQ_PYTHON to the startup file the PATH step uses, unless one is there. @param {string} py */

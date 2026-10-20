@@ -664,16 +664,71 @@ test("this machine: a Python too old for qq says where to get one, with a link",
     await page.goto(cli.url);
     await page.getByRole("radiogroup", { name: "What to do with qq" }).getByRole("radio", { name: "Install", exact: true }).check();
     await expect(page.getByText("Cannot run this yet", { exact: true })).toBeVisible();
-    await expect(page.getByText(/qq needs Python 3\.11\.4 or newer \(found Python 3\.10\.6\)\. Install a newer one, for example Python 3\.13 with uv/)).toBeVisible();
-    const link = page.getByRole("link", { name: "https://docs.astral.sh/uv/guides/install-python/", exact: true });
-    await expect(link).toHaveAttribute("href", "https://docs.astral.sh/uv/guides/install-python/");
+    await expect(page.getByText(/qq needs Python 3\.11\.4 or newer \(found Python 3\.10\.6\)\. Install Python 3\.13 with uv, which needs no sudo/)).toBeVisible();
+    const link = page.getByRole("link", { name: "https://docs.astral.sh/uv/getting-started/installation/", exact: true });
+    await expect(link).toHaveAttribute("href", "https://docs.astral.sh/uv/getting-started/installation/");
     await expect(link).toHaveAttribute("target", "_blank");
-    await expect(page.getByText(`QQ_PYTHON is set to ${py}: point it at the new one.`, { exact: false })).toBeVisible();
+    await expect(link).toHaveAttribute("rel", "noreferrer");
+    await expect(page.getByText(`QQ_PYTHON is set to ${py}: point it at python3.13.`, { exact: false })).toBeVisible();
     mkdirSync(SHOTS, { recursive: true });
     await page.screenshot({ path: join(SHOTS, "old-python-390.png"), fullPage: true });
   } finally {
     cli.proc.kill();
     await page.close();
+    rmSync(bin, { recursive: true, force: true });
+  }
+});
+
+test("this machine: with no QQ_PYTHON and only an old python3, the page names the uv command, and the terminal agrees", async ({ browser }) => {
+  // suraj's WSL: python3 is 3.10.6, nothing newer. Stand-ins first on PATH hide this runner's own python3.N.
+  const bin = mkdtempSync(join(tmpdir(), "qq-setup-e2e-py-"));
+  writeFileSync(join(bin, "python3"), "#!/bin/sh\necho 'Python 3.10.6'\n", { mode: 0o755 });
+  for (const n of ["python3.11", "python3.12", "python3.13", "python3.14", "python3.15"]) writeFileSync(join(bin, n), "#!/bin/sh\nexit 127\n", { mode: 0o755 });
+  const cli = await startCli({ PATH: `${bin}:${join(ROOT, "tests", "fake-gh")}:${process.env.PATH}`, QQ_PYTHON: "" });
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  try {
+    await page.goto(cli.url);
+    await page.getByRole("radiogroup", { name: "What to do with qq" }).getByRole("radio", { name: "Install", exact: true }).check();
+    await expect(page.getByText(/open a new terminal, run\s+uv python install 3\.13\s+then run qq-setup's command again\. qq-setup then finds python3\.13 by itself\./)).toBeVisible();
+    await expect(page.getByRole("link", { name: "https://docs.astral.sh/uv/getting-started/installation/", exact: true })).toBeVisible();
+    await expect(page.getByText(/`/)).toHaveCount(0);
+    // The long link wraps inside the alert: no sideways scroll on a phone.
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
+    expect(cli.output()).toContain("note  Python 3.11.4+: Python 3.10.6 (python3); qq and the setup step need Python 3.11.4 or newer. Install Python 3.13 with uv");
+  } finally {
+    cli.proc.kill();
+    await page.close();
+    rmSync(bin, { recursive: true, force: true });
+  }
+});
+
+test("this machine: once python3.13 is there, the terminal names the Python the install step uses, never past QQ_PYTHON", async ({ browser }) => {
+  // suraj after  uv python install 3.13 : python3 is still 3.10.6, python3.13 is new.
+  const bin = mkdtempSync(join(tmpdir(), "qq-setup-e2e-py-"));
+  writeFileSync(join(bin, "python3"), "#!/bin/sh\necho 'Python 3.10.6'\n", { mode: 0o755 });
+  writeFileSync(join(bin, "python3.13"), "#!/bin/sh\necho 'Python 3.13.14'\n", { mode: 0o755 });
+  for (const n of ["python3.11", "python3.12", "python3.14", "python3.15"]) writeFileSync(join(bin, n), "#!/bin/sh\nexit 127\n", { mode: 0o755 });
+  const PATH = `${bin}:${join(ROOT, "tests", "fake-gh")}:${process.env.PATH}`;
+  const cli = await startCli({ PATH, QQ_PYTHON: "" });
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  try {
+    expect(cli.output()).toContain("note  Python 3.11.4+: Python 3.10.6 (python3); qq and the setup step need Python 3.11.4 or newer. " +
+      "qq-setup found python3.13 (Python 3.13.14): installing or updating qq here sets QQ_PYTHON to it\n");
+    await page.goto(cli.url);
+    await page.getByRole("radiogroup", { name: "What to do with qq" }).getByRole("radio", { name: "Install", exact: true }).check();
+    await expect(page.getByText(/Tell qq to use python3\.13/)).toBeVisible();
+    await expect(page.getByText("Cannot run this yet", { exact: true })).toHaveCount(0);
+  } finally {
+    cli.proc.kill();
+    await page.close();
+  }
+  // A QQ_PYTHON that names the old one is what qq runs: the line says to point it, and claims no find.
+  const pinned = await startCli({ PATH, QQ_PYTHON: "python3" });
+  try {
+    expect(pinned.output()).toMatch(/note {2}Python 3\.11\.4\+: Python 3\.10\.6 \(python3, from QQ_PYTHON\);.*QQ_PYTHON is set to python3: point it at python3\.13\.\n/);
+    expect(pinned.output()).not.toContain("qq-setup found");
+  } finally {
+    pinned.proc.kill();
     rmSync(bin, { recursive: true, force: true });
   }
 });
