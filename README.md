@@ -110,7 +110,9 @@ at "Install xo?" installs nothing.
   finds it later. On a Mac with none, the first step is `brew install python@3.13`, then (for qq)
   `export QQ_PYTHON=python3.13` goes into the same startup file as qq's `PATH` line. That differs
   from the qq guide's Python line, which always writes `~/.zshrc`, so a bash user's next terminal
-  would have qq on `PATH` but no `QQ_PYTHON`. It checks for `git` first.
+  would have qq on `PATH` but no `QQ_PYTHON`. On Linux (and WSL) with none, nothing runs, and the page
+  and the terminal link uv's guide to installing Python (https://docs.astral.sh/uv/guides/install-python/),
+  which needs no sudo; Ubuntu 22.04's own `python3.11` is 3.11.0, too old for qq. It checks for `git` first.
 - `--only qq` or `--only xo` picks one; `--update` or `--remove` answers for every tool; `--yes` asks
   nothing (without a terminal it needs it); `--dry-run` prints the commands and runs nothing.
 

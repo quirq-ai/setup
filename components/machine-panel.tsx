@@ -285,7 +285,7 @@ export function MachinePanel({ onDone, onLook, held }: {
             <Alert variant="destructive">
               <TriangleAlert />
               <AlertTitle>Cannot run this yet</AlertTitle>
-              <AlertDescription>{plan.stop}</AlertDescription>
+              <AlertDescription>{withLinks(plan.stop)}</AlertDescription>
             </Alert>
           )}
           {plan && !plan.stop && steps.length === 0 && <p className="text-muted-foreground">Nothing to do with these choices.</p>}
@@ -384,5 +384,18 @@ export function MachinePanel({ onDone, onLook, held }: {
         </Card>
       )}
     </>
+  );
+}
+
+/** Plain text with each https link in it made clickable; the CLI writes links with a space after them. */
+function withLinks(text: string) {
+  return text.split(/(https:\/\/\S+)/).map((part, i) =>
+    i % 2 ? (
+      <a key={i} href={part} target="_blank" rel="noreferrer" className="font-medium underline underline-offset-4">
+        {part}
+      </a>
+    ) : (
+      part
+    ),
   );
 }

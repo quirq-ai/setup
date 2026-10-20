@@ -653,6 +653,31 @@ test("this machine: Windows' Node started in WSL is told so, not sent back to WS
   }
 });
 
+test("this machine: a Python too old for qq says where to get one, with a link", async ({ browser }) => {
+  // What suraj saw in WSL: Ubuntu 22.04's Python 3.10.6. QQ_PYTHON points qq-setup at a stand-in for it.
+  const bin = mkdtempSync(join(tmpdir(), "qq-setup-e2e-py-"));
+  const py = join(bin, "python3");
+  writeFileSync(py, "#!/bin/sh\necho 'Python 3.10.6'\n", { mode: 0o755 });
+  const cli = await startCli({ QQ_PYTHON: py });
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  try {
+    await page.goto(cli.url);
+    await page.getByRole("radiogroup", { name: "What to do with qq" }).getByRole("radio", { name: "Install", exact: true }).check();
+    await expect(page.getByText("Cannot run this yet", { exact: true })).toBeVisible();
+    await expect(page.getByText(/qq needs Python 3\.11\.4 or newer \(found Python 3\.10\.6\)\. Install a newer one, for example Python 3\.13 with uv/)).toBeVisible();
+    const link = page.getByRole("link", { name: "https://docs.astral.sh/uv/guides/install-python/", exact: true });
+    await expect(link).toHaveAttribute("href", "https://docs.astral.sh/uv/guides/install-python/");
+    await expect(link).toHaveAttribute("target", "_blank");
+    await expect(page.getByText(`QQ_PYTHON is set to ${py}: point it at the new one.`, { exact: false })).toBeVisible();
+    mkdirSync(SHOTS, { recursive: true });
+    await page.screenshot({ path: join(SHOTS, "old-python-390.png"), fullPage: true });
+  } finally {
+    cli.proc.kill();
+    await page.close();
+    rmSync(bin, { recursive: true, force: true });
+  }
+});
+
 test("this machine: with a relative HOME the panel offers nothing", async ({ browser }) => {
   const cli = await startCli({ HOME: "relative-home" });
   const page = await browser.newPage();

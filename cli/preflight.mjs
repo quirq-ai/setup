@@ -6,6 +6,7 @@ import { execFile } from "node:child_process";
 import { TOKEN_VARS, whoami } from "./gh.mjs";
 import { MAC, MAC_PYTHON, qqPython } from "./tools.mjs";
 import { windowsNote } from "./windows.mjs";
+import { pythonHelp } from "./install.mjs";
 
 /** What this read-only build needs: `gh auth login` grants both (with gist, which setup never uses). */
 export const NEEDED_SCOPES = ["repo", "read:org"];
@@ -48,7 +49,7 @@ export function checks(seen) {
     detail: `${seen.python ?? "not found"} (${seen.pythonCmd}${seen.env.QQ_PYTHON ? ", from QQ_PYTHON" : ""})` +
       (pyOk ? "" : "; qq and the setup step need Python 3.11.4 or newer" +
         (seen.platform === "darwin" ? `. macOS's python3 is 3.9: run  ${MAC_PYTHON.cmd}  then open a new terminal`
-          : "; install one, and set QQ_PYTHON to it unless it is python3")) });
+          : `. ${pythonHelp({ cmd: seen.env.QQ_PYTHON || null, version: seen.python, ok: false, persist: false })}`)) });
 
   if (seen.gh && !setVars.length) {
     out.push({ name: "gh login", ok: !!seen.login, fatal: true,

@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import {
-  BREW_PYTHON, cleanTmp, DEMO, defaultAction, describe, detect, localWork, main, persistPython, pickPython, pinIn, planSteps, pythonOk,
+  BREW_PYTHON, cleanTmp, DEMO, defaultAction, describe, detect, localWork, main, persistPython, pickPython, pinIn, planSteps, PYTHON_HELP, pythonOk,
   QQ_REMOVE, QQ_REMOVE_TOOLS, read, removeLineCmd, SYNC_PIN, XO, XO_PATH_LINE, XO_PIN, XO_SPEC,
 } from "../cli/install.mjs";
 import { INSTALL, MAC_PYTHON } from "../cli/tools.mjs";
@@ -122,6 +122,13 @@ test("planSteps: Python comes first when an install needs it", () => {
   assert.match(planSteps({ qq: "install", xo: "keep" }, none, { python: old, platform: "linux", git: true }).stop ?? "",
     /qq needs Python 3\.11\.4 or newer \(found Python 3\.9\.6\)/);
   assert.match(planSteps({ qq: "keep", xo: "install" }, none, { python: old, platform: "linux", git: true }).stop ?? "", /xo needs Python 3\.11 or newer/);
+  // Where to get one: a route that works on any Linux and in WSL, and whether QQ_PYTHON is in the way.
+  const stop = planSteps({ qq: "install", xo: "install" }, none, { python: old, platform: "linux", git: true }).stop ?? "";
+  assert.ok(stop.includes(` ( ${PYTHON_HELP} ), `), stop);
+  assert.match(stop, /open a new terminal, then run qq-setup's command again\. qq-setup finds python3\.11 to python3\.14 by itself\.$/);
+  const pinned = { cmd: "/opt/py310/bin/python3", version: "Python 3.10.6", ok: false, persist: false };
+  assert.match(planSteps({ qq: "install", xo: "keep" }, none, { python: pinned, platform: "linux", git: true }).stop ?? "",
+    /QQ_PYTHON is set to \/opt\/py310\/bin\/python3: point it at the new one\.$/);
   const brewed = planSteps({ qq: "install", xo: "keep" }, none, { python: { cmd: "python3.13", version: "Python 3.13.16", ok: true, persist: true }, platform: "darwin", git: true }).steps;
   assert.match(brewed[0].cmd, /grep -qs 'QQ_PYTHON=' "\$rc" \|\| printf '\\nexport QQ_PYTHON=python3\.13\\n'/);
   assert.deepEqual(brewed.slice(1), INSTALL);

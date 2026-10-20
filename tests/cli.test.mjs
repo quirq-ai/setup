@@ -156,6 +156,10 @@ test("preflight checks: token variables, scopes, Python and macOS", () => {
   const viaEnv = checks({ ...base, platform: "darwin", env: { QQ_PYTHON: "python3.13" }, pythonCmd: "python3.13", python: "Python 3.13.16" });
   assert.equal(viaEnv.find((c) => c.name === "Python 3.11.4+")?.detail, "Python 3.13.16 (python3.13, from QQ_PYTHON)");
   assert.equal(checks({ ...base, python: "Python 3.11.2" }).find((c) => c.name === "Python 3.11.4+")?.ok, false);
+  // On Linux (and WSL), the terminal line says where to get one, as the page does.
+  const linuxPy = checks({ ...base, python: "Python 3.10.6" }).find((c) => c.name === "Python 3.11.4+")?.detail ?? "";
+  assert.match(linuxPy, /qq and the setup step need Python 3\.11\.4 or newer\. Install a newer one, for example Python 3\.13 with uv \( https:\/\/docs\.astral\.sh\/uv\/guides\/install-python\/ \)/);
+  assert.match(linuxPy, /qq-setup finds python3\.11 to python3\.14 by itself\.$/);
   assert.match(mac.find((c) => c.name === "macOS")?.detail ?? "", /Linux x86_64 only.*no pin for platform.*clone with git.*--toolchain NAME=ROOT/);
 
   assert.equal(checks({ ...base, node: "v20.11.0" })[0].ok, false);
