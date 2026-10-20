@@ -113,7 +113,7 @@ deletes the venv and that entry. CI runs the install and remove for real on a Wi
   a venv (with `pyvenv.cfg`) at `~/.xo` counts as xo's; any other `~/.xo` is left alone, and xo is not
   installed over it. Removing runs `xo logout` (which deletes the saved XO key and asks before logging
   gh out), or, when xo cannot run, deletes that key itself, then `~/.xo` and its `PATH` line. After an
-  install, run `xo login` with your XO API key.
+  install, run `xo login`: it signs you in to XO in your browser when the xo server offers that, and otherwise asks for your XO API key.
 - **Python.** qq needs 3.11.4 or newer and xo 3.11: `QQ_PYTHON` if set, else `python3`, else the newest
   `python3.N` it finds. For qq, that name is then written to your startup file as `QQ_PYTHON`, so qq
   finds it later. On a Mac with none, the first step is `brew install python@3.13`, then (for qq)

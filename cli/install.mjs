@@ -424,8 +424,9 @@ export function planSteps(actions, state, { python, platform, git, demo = [], py
   const steps = [];
   const qq = usesQq(actions);
   const xo = freshXo(actions, state);
-  if ((qq || xo) && !git) {
-    return { steps, stop: `git is needed to install ${qq ? "qq" : "xo"} and is not installed${platform === "darwin" ? " (on a Mac: xcode-select --install)" : ""}` };
+  // xo's update reinstalls from a git+https spec, so it needs git too.
+  if ((qq || xo || actions.xo === "update") && !git) {
+    return { steps, stop: `git is needed to ${qq ? "install qq" : "install or update xo"} and is not installed${platform === "darwin" ? " (on a Mac: xcode-select --install)" : ""}` };
   }
   if ((qq || xo) && !python.ok) {
     const floor = pythonFloor(actions).join(".").replace(/\.0$/, "");
@@ -468,7 +469,7 @@ function planWindows(actions, state, { python, git }) {
   const steps = [];
   if (actions.qq !== "keep") return { steps, stop: "qq runs on Linux and macOS, so qq-setup cannot install, update or remove it on Windows" };
   const xo = freshXo(actions, state);
-  if (xo && !git) return { steps, stop: "git is needed to install xo and is not installed (on Windows: https://git-scm.com/downloads/win )" };
+  if ((xo || actions.xo === "update") && !git) return { steps, stop: "git is needed to install or update xo and is not installed (on Windows: https://git-scm.com/downloads/win )" };
   if (xo && !python.ok) {
     return { steps, stop: `xo needs Python 3.11 or newer (found ${python.version ?? "none"}). ${pythonHelp(python, "win32")}` };
   }
@@ -764,7 +765,7 @@ export async function main(argv, io = realIo()) {
       }
     }
     out(windows ? "\nDone. Open a new terminal so PATH takes effect." : "\nDone. Open a new terminal so PATH (and QQ_PYTHON) take effect.");
-    if (actions.xo === "install") out("Then log xo in with your XO API key:  xo login");
+    if (actions.xo === "install") out("Then log xo in:  xo login  (it opens your browser to sign in to XO, or asks for your XO API key)");
     for (const line of afterNotes(actions, home)) out(line);
     return 0;
   } finally {

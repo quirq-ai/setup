@@ -33,7 +33,7 @@ export function AboutXo() {
       </p>
       <ul className="flex list-disc flex-col gap-1 pl-5">
         <li>
-          <code className="font-mono">xo login</code> saves your XO API key, which the XO team gives you, and signs gh in to GitHub if needed;
+          <code className="font-mono">xo login</code> signs you in to XO (in your browser when the xo server offers it, otherwise with your XO API key) and signs gh in to GitHub if needed;
         </li>
         <li>
           <code className="font-mono">xo create space NAME KIND</code> creates a space on XO Cloud, such as a Claude Code or

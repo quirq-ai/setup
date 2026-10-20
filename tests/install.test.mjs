@@ -114,6 +114,8 @@ test("planSteps: install, update and remove, in order", () => {
   // Only the PATH line: no reinstall, no re-clone.
   assert.deepEqual(planSteps({ qq: "path", xo: "path" }, here, { ...linux, git: false }).steps, [INSTALL[2], XO.path]);
   assert.match(planSteps({ qq: "install", xo: "keep" }, none, { ...linux, platform: "darwin", git: false }).stop ?? "", /git is needed.*xcode-select --install/);
+  // xo's update reinstalls from git+https, so it stops without git too.
+  assert.match(planSteps({ qq: "keep", xo: "update" }, here, { ...linux, git: false }).stop ?? "", /git is needed to install or update xo /);
   // Removing needs neither git nor Python.
   assert.equal(planSteps({ qq: "remove", xo: "remove" }, here, { python: { ...py, ok: false }, platform: "linux", git: false }).stop, null);
 });
@@ -355,7 +357,9 @@ test("windows: the steps are cmd.exe commands for xo only, with Windows' Python 
   const xoHere = { ...none, xo: { ...none.xo, installed: true, onPath: true, pin: XO_PIN } };
   assert.deepEqual(go({ qq: "keep", xo: "update" }, { state: xoHere }).steps, [XO_WIN.update]);
   assert.match(go({ qq: "install", xo: "keep" }).stop ?? "", /qq runs on Linux and macOS, so qq-setup cannot install/);
-  assert.match(go({ qq: "keep", xo: "install" }, { git: false }).stop ?? "", /git is needed to install xo .*https:\/\/git-scm\.com\/downloads\/win/);
+  assert.match(go({ qq: "keep", xo: "install" }, { git: false }).stop ?? "", /git is needed to install or update xo .*https:\/\/git-scm\.com\/downloads\/win/);
+  // The update reinstalls from git+https too.
+  assert.match(go({ qq: "keep", xo: "update" }, { state: xoHere, git: false }).stop ?? "", /git is needed to install or update xo /);
   const old = go({ qq: "keep", xo: "install" }, { python: { cmd: null, version: "Python 3.10.11", ok: false, persist: false } }).stop ?? "";
   assert.match(old, /^xo needs Python 3\.11 or newer \(found Python 3\.10\.11\)\. Install Python 3\.13 from python\.org \( https:\/\/www\.python\.org\/downloads\/windows\/ \), ticking "Add python\.exe to PATH"/);
   assert.match(old, /qq-setup then finds python by itself\.$/);
