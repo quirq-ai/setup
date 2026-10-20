@@ -155,7 +155,19 @@ test("preflight checks: token variables, scopes, Python and macOS", () => {
   // qq runs QQ_PYTHON when it is set, so that is the Python checked; 3.11.0 to 3.11.3 are too old for qq.
   const viaEnv = checks({ ...base, platform: "darwin", env: { QQ_PYTHON: "python3.13" }, pythonCmd: "python3.13", python: "Python 3.13.16" });
   assert.equal(viaEnv.find((c) => c.name === "Python 3.11.4+")?.detail, "Python 3.13.16 (python3.13, from QQ_PYTHON)");
-  assert.equal(checks({ ...base, python: "Python 3.11.2" }).find((c) => c.name === "Python 3.11.4+")?.ok, false);
+  const pyLine = (/** @type {Partial<typeof base> & { newer?: string | null }} */ o) => checks({ ...base, ...o }).find((c) => c.name === "Python 3.11.4+");
+  assert.equal(pyLine({ python: "Python 3.11.2" })?.ok, false);
+  assert.equal(pyLine({ python: "Python 3.11.3" })?.ok, false);
+  assert.equal(pyLine({ python: "Python 3.11.4" })?.ok, true);
+  // On Linux (and WSL), the terminal line says where to get one, as the page does.
+  const linuxPy = pyLine({ python: "Python 3.10.6" })?.detail ?? "";
+  assert.match(linuxPy, /qq and the setup step need Python 3\.11\.4 or newer\. Install Python 3\.13 with uv, which needs no sudo: install uv \( https:\/\/docs\.astral\.sh\/uv\/getting-started\/installation\/ \), open a new terminal, run {2}uv python install 3\.13 {2}then/);
+  assert.match(linuxPy, /qq-setup then finds python3\.13 by itself\.$/);
+  assert.match(pyLine({ python: "Python 3.10.6", env: { QQ_PYTHON: "python3" } })?.detail ?? "", /\(python3, from QQ_PYTHON\);.*QQ_PYTHON is set to python3: point it at python3\.13\.$/);
+  // Once a newer one is there, the line says qq-setup found it, not to install one again.
+  const found = pyLine({ python: "Python 3.10.6", newer: "python3.13 (Python 3.13.14)" })?.detail ?? "";
+  assert.match(found, /need Python 3\.11\.4 or newer\. qq-setup found python3\.13 \(Python 3\.13\.14\): installing or updating qq here sets QQ_PYTHON to it$/);
+  assert.doesNotMatch(found, /Install Python|uv/);
   assert.match(mac.find((c) => c.name === "macOS")?.detail ?? "", /Linux x86_64 only.*no pin for platform.*clone with git.*--toolchain NAME=ROOT/);
 
   assert.equal(checks({ ...base, node: "v20.11.0" })[0].ok, false);

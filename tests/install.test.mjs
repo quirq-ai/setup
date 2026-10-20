@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import {
-  BREW_PYTHON, cleanTmp, DEMO, defaultAction, describe, detect, localWork, main, persistPython, pickPython, pinIn, planSteps, pythonOk,
+  BREW_PYTHON, cleanTmp, DEMO, defaultAction, describe, detect, localWork, main, persistPython, pickPython, pinIn, planSteps, PYTHON_HELP, pythonOk,
   QQ_REMOVE, QQ_REMOVE_TOOLS, read, removeLineCmd, SYNC_PIN, XO, XO_PATH_LINE, XO_PIN, XO_SPEC,
 } from "../cli/install.mjs";
 import { INSTALL, MAC_PYTHON } from "../cli/tools.mjs";
@@ -82,6 +82,15 @@ test("pickPython: QQ_PYTHON, else python3, else the newest python3.N, which qq m
   assert.equal((await pickPython({}, [3, 11, 0], runWith({ python3: "Python 3.11.2" }))).ok, true);
   // The newest python3.N first.
   assert.equal((await pickPython({}, qq, runWith({ python3: "Python 3.9.6", "python3.14": "Python 3.14.0", "python3.11": "Python 3.11.9" }))).cmd, "python3.14");
+  // Every python3.N in the range is looked for; Ubuntu 22.04's python3.11 (3.11.0) is too old for qq, not for xo.
+  for (const n of ["python3.11", "python3.12", "python3.13", "python3.14"]) {
+    assert.equal((await pickPython({}, qq, runWith({ python3: "Python 3.10.6", [n]: "Python 3.11.4" }))).cmd, n);
+  }
+  assert.equal((await pickPython({}, qq, runWith({ python3: "Python 3.10.6", "python3.11": "Python 3.11.3" }))).ok, false);
+  assert.equal((await pickPython({}, [3, 11, 0], runWith({ python3: "Python 3.10.6", "python3.11": "Python 3.11.0" }))).cmd, "python3.11");
+  // A QQ_PYTHON that is too old is reported as it is: nothing else is tried.
+  assert.deepEqual(await pickPython({ QQ_PYTHON: "python3" }, qq, runWith({ python3: "Python 3.10.6", "python3.13": "Python 3.13.16" })),
+    { cmd: "python3", version: "Python 3.10.6", ok: false, persist: false });
   assert.throws(() => persistPython("python3; rm -rf ~"), /not a python3\.N name/);
   assert.match(persistPython("python3.12").cmd, /export QQ_PYTHON=python3\.12/);
 });
@@ -122,6 +131,17 @@ test("planSteps: Python comes first when an install needs it", () => {
   assert.match(planSteps({ qq: "install", xo: "keep" }, none, { python: old, platform: "linux", git: true }).stop ?? "",
     /qq needs Python 3\.11\.4 or newer \(found Python 3\.9\.6\)/);
   assert.match(planSteps({ qq: "keep", xo: "install" }, none, { python: old, platform: "linux", git: true }).stop ?? "", /xo needs Python 3\.11 or newer/);
+  // Where to get one: a route that works on any Linux and in WSL, and whether QQ_PYTHON is in the way.
+  const stop = planSteps({ qq: "install", xo: "install" }, none, { python: old, platform: "linux", git: true }).stop ?? "";
+  assert.equal(PYTHON_HELP, "https://docs.astral.sh/uv/getting-started/installation/");
+  // The version is named: uv's own guide starts with the newest Python (3.15), which qq-setup does not look for.
+  assert.equal(stop, "qq needs Python 3.11.4 or newer (found Python 3.9.6). Install Python 3.13 with uv, which needs no sudo: " +
+    "install uv ( https://docs.astral.sh/uv/getting-started/installation/ ), open a new terminal, run  uv python install 3.13  " +
+    "then run qq-setup's command again. qq-setup then finds python3.13 by itself.");
+  assert.doesNotMatch(stop, /`/);
+  const pinned = { cmd: "/opt/py310/bin/python3", version: "Python 3.10.6", ok: false, persist: false };
+  assert.match(planSteps({ qq: "install", xo: "keep" }, none, { python: pinned, platform: "linux", git: true }).stop ?? "",
+    /QQ_PYTHON is set to \/opt\/py310\/bin\/python3: point it at python3\.13\.$/);
   const brewed = planSteps({ qq: "install", xo: "keep" }, none, { python: { cmd: "python3.13", version: "Python 3.13.16", ok: true, persist: true }, platform: "darwin", git: true }).steps;
   assert.match(brewed[0].cmd, /grep -qs 'QQ_PYTHON=' "\$rc" \|\| printf '\\nexport QQ_PYTHON=python3\.13\\n'/);
   assert.deepEqual(brewed.slice(1), INSTALL);
