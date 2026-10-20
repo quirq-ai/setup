@@ -202,7 +202,7 @@ export function MachinePanel({ onDone, onLook, held }: {
                 ) : tool === "qq" && m.qq.note ? (
                   <p className="text-sm">{m.qq.note}</p>
                 ) : (
-                  <p className="text-sm">Move ~/.xo away to install xo here; qq-setup leaves it alone.</p>
+                  <p className="text-sm">Move the .xo folder in your home folder away to install xo here; qq-setup leaves it alone.</p>
                 )}
               </fieldset>
             );

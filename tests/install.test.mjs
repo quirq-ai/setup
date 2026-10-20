@@ -3,12 +3,12 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { test } from "node:test";
 
 import {
-  BREW_PYTHON, choices, cleanTmp, DEMO, defaultAction, describe, detect, localWork, main, persistPython, pickPython, pinIn, planSteps, PYTHON_HELP, pythonOk,
-  QQ_REMOVE, QQ_REMOVE_TOOLS, read, removeLineCmd, stepCommand, SYNC_PIN, XO, XO_PATH_LINE, XO_PIN, XO_SPEC, XO_WIN,
+  BREW_PYTHON, choices, cleanTmp, DEMO, defaultAction, describe, detect, findExe, localWork, main, persistPython, pickPython, pinIn, planSteps, PYTHON_HELP, pythonOk,
+  QQ_REMOVE, QQ_REMOVE_TOOLS, read, removeLineCmd, stepCommand, SYNC_PIN, systemExe, XO, XO_PATH_LINE, XO_PIN, XO_SPEC, XO_WIN,
 } from "../cli/install.mjs";
 import { INSTALL, MAC_PYTHON } from "../cli/tools.mjs";
 
@@ -276,12 +276,19 @@ async function drive(argv, { home, answers = [], tty = true, platform = "linux",
 function winRun({ python = "Python 3.13.16", git = true, userPath = "C:\\Windows\\system32", xo = true } = {}) {
   return async (/** @type {string} */ file) => {
     if (file === "git") return git ? "git version 2.51.0.windows.1" : null;
-    if (file === "python") return python;
-    if (file === "reg") return `\r\nHKEY_CURRENT_USER\\Environment\r\n    Path    REG_EXPAND_SZ    ${userPath}\r\n`;
+    if (file.endsWith("python.exe")) return python;
+    if (file === "C:\\Windows\\System32\\reg.exe") return `\r\nHKEY_CURRENT_USER\\Environment\r\n    Path    REG_EXPAND_SZ    ${userPath}\r\n`;
     if (file.endsWith("xo.exe")) return xo ? "xo 0.1.0\r\n" : null;
     if (file.endsWith("pip.exe")) return `quirq-xo @ git+https://github.com/quirq-ai/xo@${XO_PIN}\r\n`;
     return null;
   };
+}
+
+/** A folder with python.exe, for PATH: Windows' Python is run by its full path, never by name. */
+function winBin() {
+  const bin = mkdtempSync(join(tmpdir(), "qq-setup-win-bin-"));
+  writeFileSync(join(bin, "python.exe"), "");
+  return bin;
 }
 
 /** A Windows home with xo's venv (Scripts\xo.exe, pip.exe, pyvenv.cfg). */
@@ -301,7 +308,7 @@ test("windows: detect offers nothing for qq and finds xo's venv and its user PAT
   assert.match(describe(s)[0], /qq {2}not on Windows: qq runs on Linux and macOS/);
   assert.deepEqual({ installed: s.xo.installed, onPath: s.xo.onPath, pin: s.xo.pin, behind: s.xo.behind }, { installed: true, onPath: true, pin: XO_PIN, behind: [] });
   // Expanded or not, with a trailing backslash, any case; another folder ending in .xo\Scripts-ish is not it.
-  for (const p of ["C:\\Users\\a\\.xo\\Scripts", "c:\\users\\a\\.XO\\scripts\;C:\\x"]) {
+  for (const p of ["C:\\Users\\a\\.xo\\Scripts", "c:\\users\\a\\.XO\\scripts\\;C:\\x"]) {
     assert.equal((await detect({ home, run: winRun({ userPath: p }), platform: "win32" })).xo.onPath, true, p);
   }
   const off = await detect({ home, run: winRun({ userPath: "C:\\Users\\a\\.xo\\Scripts-old;C:\\Windows" }), platform: "win32" });
@@ -321,12 +328,23 @@ test("windows: the steps are cmd.exe commands for xo only, with Windows' Python 
   for (const s of [XO_WIN.install, XO_WIN.path, XO_WIN.update, ...XO_WIN.remove]) {
     assert.doesNotMatch(s.cmd, /~\/|\/bin\/|\$HOME/, s.what);
   }
-  // PowerShell's -Command is one quoted cmd.exe argument: no double quote inside it.
+  // PowerShell's -Command is one quoted cmd.exe argument: no double quote inside it. It stops at its first
+  // error, so a refused registry write is never followed by the line saying it worked.
+  const PS = /^"%SystemRoot%\\System32\\WindowsPowerShell\\v1\.0\\powershell\.exe" -NoProfile -NonInteractive -Command "\$ErrorActionPreference = 'Stop'; /;
   for (const s of [XO_WIN.path, XO_WIN.remove[2]]) {
-    const inner = s.cmd.replace(/^powershell -NoProfile -Command "/, "");
+    assert.match(s.cmd, PS, s.what);
+    const inner = s.cmd.replace(PS, "");
     assert.ok(inner.endsWith('"') && !inner.slice(0, -1).includes('"'), s.what);
     assert.match(inner, /DoNotExpandEnvironmentNames/);
     assert.match(inner, /'ExpandString'/);
+    // xo's entries: those naming its folder once expanded, with or without a last \.
+    assert.ok(inner.includes("$ours = @($parts | Where-Object { [Environment]::ExpandEnvironmentVariables($_).TrimEnd('\\') -eq $d }); "), s.what);
+  }
+  assert.ok(XO_WIN.path.cmd.includes("if (-not $ours.Count) { $k.SetValue('Path', (@($parts) + $d) -join ';', 'ExpandString'); "));
+  assert.ok(XO_WIN.remove[2].cmd.includes("if ($ours.Count) { $k.SetValue('Path', (@($parts | Where-Object { $ours -notcontains $_ })) -join ';', 'ExpandString'); "));
+  // No %VAR% outside double quotes, where a ) or & in a folder name would break cmd.exe's line.
+  for (const s of [XO_WIN.install, XO_WIN.path, XO_WIN.update, ...XO_WIN.remove]) {
+    assert.doesNotMatch(s.cmd.replace(/"[^"]*"/g, ""), /%/, s.what);
   }
   assert.deepEqual(go({ qq: "keep", xo: "remove" }).steps, XO_WIN.remove);
   const xoHere = { ...none, xo: { ...none.xo, installed: true, onPath: true, pin: XO_PIN } };
@@ -336,25 +354,106 @@ test("windows: the steps are cmd.exe commands for xo only, with Windows' Python 
   const old = go({ qq: "keep", xo: "install" }, { python: { cmd: null, version: "Python 3.10.11", ok: false, persist: false } }).stop ?? "";
   assert.match(old, /^xo needs Python 3\.11 or newer \(found Python 3\.10\.11\)\. Install Python 3\.13 from python\.org \( https:\/\/www\.python\.org\/downloads\/windows\/ \), ticking "Add python\.exe to PATH"/);
   assert.match(old, /qq-setup then finds python by itself\.$/);
-  // Steps run in cmd.exe there, through Node's shell.
-  assert.deepEqual(stepCommand("echo hi", "win32"), ["echo hi", [], { shell: true }]);
+  // Steps run in cmd.exe there, as Node's shell does it, plus /v:off; cmd.exe by full path when ComSpec is unset.
+  assert.deepEqual(stepCommand("echo hi", "win32", { ComSpec: "C:\\WINDOWS\\system32\\cmd.exe" }),
+    ["C:\\WINDOWS\\system32\\cmd.exe", ["/d", "/v:off", "/s", "/c", '"echo hi"'], { windowsVerbatimArguments: true }]);
+  assert.equal(stepCommand("echo hi", "win32", { SystemRoot: "D:\\Win" })[0], "D:\\Win\\System32\\cmd.exe");
   assert.deepEqual(stepCommand("echo hi", "linux"), ["/bin/sh", ["-c", "echo hi"], {}]);
 });
 
-test("windows: pickPython tries python, then the py launcher, and never writes QQ_PYTHON", async () => {
-  const run = (/** @type {Record<string, string>} */ v) => async (/** @type {string} */ f) => v[f] ?? null;
-  assert.deepEqual(await pickPython({}, [3, 11, 0], run({ python: "Python 3.13.16" }), "win32"), { cmd: "python", version: "Python 3.13.16", ok: true, persist: false });
-  assert.deepEqual(await pickPython({}, [3, 11, 0], run({ python: "Python 3.10.11", py: "Python 3.12.10" }), "win32"), { cmd: "py", version: "Python 3.12.10", ok: true, persist: false });
-  assert.deepEqual(await pickPython({}, [3, 11, 0], run({}), "win32"), { cmd: null, version: null, ok: false, persist: false });
+test("windows: pickPython tries python, then the py launcher, by full path, and never writes QQ_PYTHON", async () => {
+  // The full paths findExe gives; run answers for those only, so a bare name would find nothing.
+  const at = { python: "C:\\Py\\python.exe", py: "C:\\Windows\\py.exe" };
+  const find = (/** @type {string} */ n) => /** @type {Record<string, string>} */ (at)[n] ?? null;
+  const run = (/** @type {Record<string, string>} */ v) => async (/** @type {string} */ f) => {
+    const name = Object.keys(at).find((k) => /** @type {Record<string, string>} */ (at)[k] === f);
+    return name && name in v ? v[name] : null;
+  };
+  const pick = (/** @type {Record<string, string>} */ v, env = {}) => pickPython(env, [3, 11, 0], run(v), "win32", find);
+  assert.deepEqual(await pick({ python: "Python 3.13.16" }), { cmd: at.python, version: "Python 3.13.16", ok: true, persist: false });
+  assert.deepEqual(await pick({ python: "Python 3.10.11", py: "Python 3.12.10" }), { cmd: at.py, version: "Python 3.12.10", ok: true, persist: false });
+  assert.deepEqual(await pick({}), { cmd: null, version: null, ok: false, persist: false });
+  // Both new enough: python, the one on PATH, as the xo quickstart's python3 -m venv.
+  assert.equal((await pick({ python: "Python 3.12.10", py: "Python 3.13.16" })).cmd, at.python);
+  // A bare QQ_PYTHON is looked up the same way; one not in PATH's folders is not run at all.
+  assert.deepEqual(await pick({ py: "Python 3.12.10" }, { QQ_PYTHON: "py.exe" }), { cmd: at.py, version: "Python 3.12.10", ok: true, persist: false });
+  assert.deepEqual(await pick({ python: "Python 3.13.16" }, { QQ_PYTHON: "python3" }), { cmd: "python3", version: null, ok: false, persist: false });
+});
+
+test("windows: findExe looks in PATH's absolute folders only, never the current one", () => {
+  const bin = winBin();
+  const env = { PATH: ["", ".", "relative", bin].join(delimiter) };
+  assert.equal(findExe("python", env), join(bin, "python.exe"));
+  assert.equal(findExe("py", env), null);
+  const cwd = process.cwd();
+  process.chdir(bin);
+  try {
+    assert.equal(findExe("python", { PATH: [".", "x"].join(delimiter) }), null);
+  } finally {
+    process.chdir(cwd);
+  }
+  assert.equal(systemExe("reg.exe", {}), "C:\\Windows\\System32\\reg.exe");
+});
+
+test("windows: remove logs xo out, then deletes only %USERPROFILE%\\.xo, then only xo's PATH entries", () => {
+  const [logout, folder, path] = XO_WIN.remove;
+  assert.deepEqual([logout.what, folder.what], [XO.remove[0].what, XO.remove[1].what]);
+  assert.match(path.what, /^Take xo off your PATH/);
+  // The folder, and only it; then a failure when anything of it is left (a file in use).
+  assert.equal(folder.cmd, 'rmdir /s /q "%USERPROFILE%\\.xo" & if exist "%USERPROFILE%\\.xo\\" ' +
+    "(echo xo's folder is still there, likely a file in it is in use: close any terminal running xo, then remove xo again& exit /b 1) else (call )");
+  // When xo cannot run: the two files xo logout deletes (xo client.py credentials_path, services.py
+  // addresses_path), in %XDG_CONFIG_HOME%\xo when that is absolute, else %USERPROFILE%\.config\xo; files only.
+  const [first, fallback, ...rest] = logout.cmd.split(" || ");
+  assert.equal(first, '"%USERPROFILE%\\.xo\\Scripts\\xo.exe" logout');
+  assert.deepEqual(rest, []);
+  assert.match(fallback, /^"%SystemRoot%\\System32\\WindowsPowerShell\\v1\.0\\powershell\.exe" -NoProfile -NonInteractive -Command "\$ErrorActionPreference = 'Stop'; /);
+  assert.ok(fallback.includes("$c = if ($b -match '^([A-Za-z]:)?[\\\\/]') { Join-Path $b 'xo' } else { Join-Path $env:USERPROFILE '.config\\xo' }; "));
+  assert.ok(fallback.includes("foreach ($f in 'credentials', 'services') { $p = Join-Path $c $f; if (Test-Path -LiteralPath $p -PathType Leaf) { Remove-Item -LiteralPath $p -Force } }; "));
+  assert.ok(!fallback.slice(0, -1).replace(/^"[^"]*"[^"]*"/, "").includes('"'));
+});
+
+test("windows: a %USERPROFILE%\\.xo that is not a venv is never touched", async () => {
+  const home = mkdtempSync(join(tmpdir(), "qq-setup-win-foreign-"));
+  mkdirSync(join(home, ".xo"));
+  const s = await detect({ home, run: winRun(), platform: "win32" });
+  assert.equal(s.xo.foreign, true);
+  assert.deepEqual(choices(s.xo), []);
+  assert.match(describe(s)[1], /^ {2}xo {2}%USERPROFILE%\\\.xo is there but is not an xo install/);
+  for (const argv of [["--yes"], ["--remove", "--yes"], ["--update", "--yes"]]) {
+    const r = await drive(argv, { home, platform: "win32", env: { USERPROFILE: home }, run: winRun() });
+    assert.deepEqual(r.steps, [], argv.join(" "));
+    assert.ok(r.out.includes("  xo: %USERPROFILE%\\.xo is not an xo install, so it is left alone. Move it away first to install xo there."), r.out.join("\n"));
+  }
+});
+
+test("main: on Windows, a USERPROFILE that is not absolute stops before anything is looked at", async () => {
+  for (const USERPROFILE of ["Users\\sam", "C:Users\\sam", ""]) {
+    let looked = false;
+    const r = await drive(["--remove", "--yes"], { home: "/nonexistent", platform: "win32", env: { USERPROFILE },
+      run: async () => { looked = true; return null; } });
+    assert.equal(r.code, 2, USERPROFILE);
+    assert.equal(looked, false, USERPROFILE);
+    assert.deepEqual(r.steps, []);
+  }
+});
+
+test("main: on Windows, the questions are about xo only", async () => {
+  const home = mkdtempSync(join(tmpdir(), "qq-setup-win-ask-"));
+  const r = await drive([], { home, platform: "win32", env: { USERPROFILE: home }, run: winRun({ xo: false }), answers: ["n"] });
+  assert.deepEqual(r.asked, ["Install xo? [Y/n] "]);
+  assert.deepEqual(r.steps, []);
 });
 
 test("main: on Windows, install looks at xo only, says why not qq, and runs xo's cmd.exe steps", async () => {
   const home = mkdtempSync(join(tmpdir(), "qq-setup-win-new-"));
-  const env = { USERPROFILE: home, INIT_CWD: "C:\\Users\\a" };
+  const bin = winBin();
+  const env = { USERPROFILE: home, INIT_CWD: "C:\\Users\\a", PATH: bin };
   const r = await drive(["--yes"], { home, platform: "win32", env, run: winRun({ xo: false }) });
   assert.equal(r.code, 0);
   assert.deepEqual(r.steps, [XO_WIN.install.cmd, XO_WIN.path.cmd]);
-  assert.equal(r.envs[0].QQ_PYTHON, "python");
+  assert.equal(r.envs[0].QQ_PYTHON, join(bin, "python.exe"));
+  assert.ok(r.out.includes("\nDone. Open a new terminal so PATH takes effect."), r.out.join("\n"));
   assert.ok(r.out.some((l) => /^ {2}qq: qq runs on Linux and macOS, so qq-setup cannot install it on Windows; xo installs here\./.test(l)), r.out.join("\n"));
   // qq alone: nothing to do on Windows, and the note says so (the WSL one when npx started in WSL).
   const qq = await drive(["--only", "qq", "--yes"], { home, platform: "win32", env: { ...env, INIT_CWD: "\\\\wsl.localhost\\Ubuntu\\home\\a" }, run: winRun() });

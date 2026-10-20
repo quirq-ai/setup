@@ -172,13 +172,14 @@ jobs:
         with:
           node-version: 22
 
-      # A user PATH entry stored with a %VAR% in it must stay that way after the install and the remove.
+      # A user PATH entry stored with a %VAR% in it, and with "xo" in its name, must stay as it is after
+      # the install and the remove.
       - name: Seed the user PATH
         shell: pwsh
         run: |
           $k = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
           $old = [string]$k.GetValue('Path', '', 'DoNotExpandEnvironmentNames')
-          $k.SetValue('Path', (@($old -split ';' | Where-Object { $_ }) + '%USERPROFILE%\qq-ci-keep') -join ';', 'ExpandString')
+          $k.SetValue('Path', (@($old -split ';' | Where-Object { $_ }) + '%USERPROFILE%\qq-ci-xo-keep') -join ';', 'ExpandString')
 
       - name: Install xo
         shell: cmd
@@ -189,25 +190,136 @@ jobs:
         run: |
           & "$env:USERPROFILE\.xo\Scripts\xo.exe" --version
           if ($LASTEXITCODE -ne 0) { throw "xo.exe did not run" }
-          $p = [string][Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment').GetValue('Path', '', 'DoNotExpandEnvironmentNames')
+          $k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment')
+          $p = [string]$k.GetValue('Path', '', 'DoNotExpandEnvironmentNames')
           Write-Output $p
           $d = Join-Path $env:USERPROFILE '.xo\Scripts'
           if (@($p -split ';') -notcontains $d) { throw "the user PATH lacks $d" }
-          if (@($p -split ';') -notcontains '%USERPROFILE%\qq-ci-keep') { throw "the user PATH lost an unexpanded entry" }
+          if (@($p -split ';') -notcontains '%USERPROFILE%\qq-ci-xo-keep') { throw "the user PATH lost an unexpanded entry" }
+          if ([string]$k.GetValueKind('Path') -ne 'ExpandString') { throw "the user PATH is no longer an ExpandString" }
 
       - name: A second install finds xo and changes nothing
-        shell: cmd
-        run: node cli/bin.mjs install --only xo --yes
+        shell: pwsh
+        run: |
+          $out = node cli/bin.mjs install --only xo --yes | Out-String
+          Write-Output $out
+          if ($LASTEXITCODE -ne 0) { throw "exit $LASTEXITCODE" }
+          if ($out -notmatch 'Nothing to do\.') { throw "the second install planned steps" }
+
+      # xo logout must delete them: they are where xo keeps its key on Windows (client.py credentials_path).
+      - name: Give xo key files to delete
+        shell: pwsh
+        run: |
+          $c = Join-Path $env:USERPROFILE '.config\xo'
+          New-Item -ItemType Directory -Force -Path $c | Out-Null
+          foreach ($f in 'credentials', 'services') { Set-Content -LiteralPath (Join-Path $c $f) -Value 'x' }
 
       - name: Remove xo
         shell: cmd
         run: node cli/bin.mjs install --only xo --remove --yes
 
-      - name: xo and its PATH entry are gone
+      - name: xo, its key files and its PATH entry are gone
         shell: pwsh
         run: |
           if (Test-Path "$env:USERPROFILE\.xo") { throw "$env:USERPROFILE\.xo is still there" }
-          $p = [string][Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment').GetValue('Path', '', 'DoNotExpandEnvironmentNames')
+          foreach ($f in 'credentials', 'services') { if (Test-Path "$env:USERPROFILE\.config\xo\$f") { throw "xo logout left $f" } }
+          $k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment')
+          $p = [string]$k.GetValue('Path', '', 'DoNotExpandEnvironmentNames')
           Write-Output $p
           if ($p -match '\\\.xo\\Scripts') { throw "the user PATH still has xo" }
-          if (@($p -split ';') -notcontains '%USERPROFILE%\qq-ci-keep') { throw "the user PATH lost an unexpanded entry" }
+          if (@($p -split ';') -notcontains '%USERPROFILE%\qq-ci-xo-keep') { throw "the user PATH lost an unexpanded entry" }
+          if ([string]$k.GetValueKind('Path') -ne 'ExpandString') { throw "the user PATH is no longer an ExpandString" }
+
+      # A broken xo (its venv without xo.exe) in a profile folder named with a space, ( ) and &: the logout
+      # step deletes the key files itself, in %XDG_CONFIG_HOME%\xo when that is set, and no folder name
+      # breaks a cmd.exe line.
+      - name: Remove a broken xo from an odd profile folder
+        shell: pwsh
+        run: |
+          foreach ($xdg in '', (Join-Path $env:RUNNER_TEMP 'xdg (c) & d')) {
+            $home2 = Join-Path $env:RUNNER_TEMP 'qq ci (a) & b'
+            New-Item -ItemType Directory -Force -Path (Join-Path $home2 '.xo') | Out-Null
+            Set-Content -LiteralPath (Join-Path $home2 '.xo\pyvenv.cfg') -Value 'home = C:\nowhere'
+            $keys = if ($xdg) { Join-Path $xdg 'xo' } else { Join-Path $home2 '.config\xo' }
+            New-Item -ItemType Directory -Force -Path $keys | Out-Null
+            foreach ($f in 'credentials', 'services') { Set-Content -LiteralPath (Join-Path $keys $f) -Value 'x' }
+            $env:USERPROFILE = $home2
+            $env:XDG_CONFIG_HOME = $xdg
+            node cli/bin.mjs install --only xo --remove --yes
+            if ($LASTEXITCODE -ne 0) { throw "remove exited $LASTEXITCODE" }
+            foreach ($f in 'credentials', 'services') { if (Test-Path -LiteralPath (Join-Path $keys $f)) { throw "$keys\$f is still there" } }
+            if (Test-Path -LiteralPath (Join-Path $home2 '.xo')) { throw "$home2\.xo is still there" }
+          }
+
+      # cmd.exe with DelayedExpansion on (a registry setting /d does not turn off) would eat the ! in this
+      # folder name and delete or check the wrong folder; the steps run with /v:off.
+      - name: Remove a broken xo from a profile folder with ! in it, with DelayedExpansion on
+        shell: pwsh
+        run: |
+          $cp = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Software\Microsoft\Command Processor')
+          $cp.SetValue('DelayedExpansion', 1, 'DWord')
+          try {
+            $home2 = Join-Path $env:RUNNER_TEMP 'qq ci !x! y'
+            New-Item -ItemType Directory -Force -Path (Join-Path $home2 '.xo') | Out-Null
+            Set-Content -LiteralPath (Join-Path $home2 '.xo\pyvenv.cfg') -Value 'home = C:\nowhere'
+            $env:USERPROFILE = $home2
+            node cli/bin.mjs install --only xo --remove --yes
+            if ($LASTEXITCODE -ne 0) { throw "remove exited $LASTEXITCODE" }
+            if (Test-Path -LiteralPath (Join-Path $home2 '.xo')) { throw "$home2\.xo is still there" }
+          } finally {
+            $cp.DeleteValue('DelayedExpansion')
+          }
+
+      # A file in use (here pyvenv.cfg, held open) is left by rmdir, which may still exit 0: the remove must
+      # fail there, not go on to "Done", and work once the file is free.
+      - name: Removing xo with a file in use fails, then works once it is free
+        shell: pwsh
+        run: |
+          $home2 = Join-Path $env:RUNNER_TEMP 'qq ci locked'
+          New-Item -ItemType Directory -Force -Path (Join-Path $home2 '.xo\Scripts') | Out-Null
+          Set-Content -LiteralPath (Join-Path $home2 '.xo\pyvenv.cfg') -Value 'home = C:\nowhere'
+          $env:USERPROFILE = $home2
+          $held = [System.IO.File]::Open((Join-Path $home2 '.xo\pyvenv.cfg'), 'Open', 'Read', 'None')
+          try {
+            $out = node cli/bin.mjs install --only xo --remove --yes | Out-String
+            Write-Output $out
+            if ($LASTEXITCODE -eq 0) { throw "remove exited 0 with a file in use" }
+            if ($out -notmatch "xo's folder is still there") { throw "remove did not say why it stopped" }
+            if ($out -match 'Done\.') { throw "remove said Done" }
+          } finally {
+            $held.Close()
+          }
+          node cli/bin.mjs install --only xo --remove --yes
+          if ($LASTEXITCODE -ne 0) { throw "remove exited $LASTEXITCODE once the file was free" }
+          if (Test-Path -LiteralPath (Join-Path $home2 '.xo')) { throw "$home2\.xo is still there" }
+
+      # Windows looks in the current folder before PATH. Programs planted there under the names qq-setup
+      # uses (python, py, powershell, reg, cmd) must never run: it names them by full path.
+      - name: Programs planted in the current folder never run
+        shell: powershell
+        run: |
+          $plant = Join-Path $env:RUNNER_TEMP 'planted'
+          New-Item -ItemType Directory -Force -Path $plant | Out-Null
+          $src = 'public static class P { public static int Main(string[] a) { System.IO.File.AppendAllText(System.Environment.GetEnvironmentVariable("QQ_CI_MARK"), System.Environment.GetCommandLineArgs()[0] + "\n"); return 1; } }'
+          Add-Type -TypeDefinition $src -OutputAssembly (Join-Path $plant 'planted.exe') -OutputType ConsoleApplication
+          foreach ($n in 'python', 'py', 'powershell', 'reg', 'cmd') { Copy-Item (Join-Path $plant 'planted.exe') (Join-Path $plant "$n.exe") }
+          $env:QQ_CI_MARK = Join-Path $env:RUNNER_TEMP 'planted-ran.txt'
+          $home2 = Join-Path $env:RUNNER_TEMP 'qq ci planted'
+          New-Item -ItemType Directory -Force -Path (Join-Path $home2 '.xo') | Out-Null
+          Set-Content -LiteralPath (Join-Path $home2 '.xo\pyvenv.cfg') -Value 'home = C:\nowhere'
+          $keys = Join-Path $home2 '.config\xo'
+          New-Item -ItemType Directory -Force -Path $keys | Out-Null
+          Set-Content -LiteralPath (Join-Path $keys 'credentials') -Value 'x'
+          $env:USERPROFILE = $home2
+          Push-Location $plant
+          try {
+            node (Join-Path $env:GITHUB_WORKSPACE 'cli\bin.mjs') install --only xo --remove --yes
+            if ($LASTEXITCODE -ne 0) { throw "remove exited $LASTEXITCODE" }
+            node (Join-Path $env:GITHUB_WORKSPACE 'cli\bin.mjs') install --only xo --dry-run --yes
+            if ($LASTEXITCODE -ne 0) { throw "dry run exited $LASTEXITCODE" }
+          } finally {
+            Pop-Location
+          }
+          if (Test-Path -LiteralPath $env:QQ_CI_MARK) { Get-Content -LiteralPath $env:QQ_CI_MARK; throw "a planted program ran" }
+          if (Test-Path -LiteralPath (Join-Path $keys 'credentials')) { throw "the key file is still there" }
+          if (Test-Path -LiteralPath (Join-Path $home2 '.xo')) { throw "$home2\.xo is still there" }

@@ -6,7 +6,7 @@ import { execFile } from "node:child_process";
 import { TOKEN_VARS, whoami } from "./gh.mjs";
 import { MAC, MAC_PYTHON, qqPython } from "./tools.mjs";
 import { windowsNote } from "./windows.mjs";
-import { pickPython, pythonHelp, pythonOk } from "./install.mjs";
+import { findExe, pickPython, pythonHelp, pythonOk } from "./install.mjs";
 
 /** What this read-only build needs: `gh auth login` grants both (with gist, which setup never uses). */
 export const NEEDED_SCOPES = ["repo", "read:org"];
@@ -44,11 +44,13 @@ export function checks(seen) {
   // qq's launcher runs QQ_PYTHON, else python3, and refuses anything older than 3.11.4 (qq bin/qq:20-23);
   // the setup step's qqcfg needs 3.11+. Check the one qq will run. When it is too old, qq-setup's install
   // step looks further (python3.14 to python3.11) and sets QQ_PYTHON to what it finds: seen.newer.
-  const pyOk = pythonOk(seen.python);
-  out.push({ name: "Python 3.11.4+", ok: pyOk, fatal: false,
+  // On Windows, where qq does not run, the one xo's install uses: python, else py, at 3.11 or newer.
+  const win = seen.platform === "win32";
+  const pyOk = pythonOk(seen.python, win ? [3, 11, 0] : [3, 11, 4]);
+  out.push({ name: win ? "Python 3.11+" : "Python 3.11.4+", ok: pyOk, fatal: false,
     detail: `${seen.python ?? "not found"} (${seen.pythonCmd}${seen.env.QQ_PYTHON ? ", from QQ_PYTHON" : ""})` +
-      (pyOk ? "" : "; qq and the setup step need Python 3.11.4 or newer" +
-        (seen.newer ? `. qq-setup found ${seen.newer}: installing or updating qq here sets QQ_PYTHON to it`
+      (pyOk ? "" : (win ? "; xo needs Python 3.11 or newer" : "; qq and the setup step need Python 3.11.4 or newer") +
+        (seen.newer ? (win ? `. qq-setup found ${seen.newer}: installing xo here uses it` : `. qq-setup found ${seen.newer}: installing or updating qq here sets QQ_PYTHON to it`)
           : seen.platform === "darwin" ? `. macOS's python3 is 3.9: run  ${MAC_PYTHON.cmd}  then open a new terminal`
             : `. ${pythonHelp({ cmd: seen.env.QQ_PYTHON || null, version: seen.python, ok: false, persist: false }, seen.platform)}`)) });
 
@@ -101,7 +103,9 @@ export async function preflight() {
   const [git, ghv, python] = await Promise.all([
     version("git", ["--version"]),
     version("gh", ["--version"]),
-    version(pythonCmd, ["--version"]),
+    // On Windows by full path from PATH's folders, never the current folder's python.exe.
+    process.platform === "win32" ? (async () => { const at = /[\\/]/.test(pythonCmd) ? pythonCmd : findExe(pythonCmd.replace(/\.exe$/i, ""), process.env);
+      return at ? version(at, ["--version"]) : null; })() : version(pythonCmd, ["--version"]),
   ]);
   let login = null, scopes = null, loginError = null;
   if (ghv && !TOKEN_VARS.some((v) => process.env[v])) {
@@ -113,7 +117,8 @@ export async function preflight() {
     }
   }
   // What the install step would use instead, as it picks it (never past a QQ_PYTHON).
-  const newer = !process.env.QQ_PYTHON && !pythonOk(python) ? await pickPython(process.env, [3, 11, 4]) : null;
+  const floor = process.platform === "win32" ? [3, 11, 0] : [3, 11, 4];
+  const newer = !process.env.QQ_PYTHON && !pythonOk(python, floor) ? await pickPython(process.env, floor) : null;
   return checks({ node: process.version, platform: process.platform, env: process.env, cwd: process.cwd(),
     git, gh: ghv, python, pythonCmd, login, scopes, loginError, newer: newer?.ok ? `${newer.cmd} (${newer.version})` : null });
 }

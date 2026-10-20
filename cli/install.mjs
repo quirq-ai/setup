@@ -10,7 +10,7 @@
 
 import { execFile, spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { isAbsolute, join, win32 } from "node:path";
+import { delimiter, isAbsolute, join, win32 } from "node:path";
 import { INSTALL, MAC_PYTHON } from "./tools.mjs";
 import { windowsNote } from "./windows.mjs";
 
@@ -81,17 +81,28 @@ export const XO = {
 /** xo's programs on Windows: the quickstart's venv at %USERPROFILE%\.xo keeps them in Scripts\. */
 const XO_WIN_BIN = "%USERPROFILE%\\.xo\\Scripts";
 /**
+ * A PowerShell command for cmd.exe. It stops at its first error and exits 1, so a write that fails (no
+ * access, or PowerShell's constrained language mode) is never followed by a line saying it worked, and it
+ * never waits for input. It reads %USERPROFILE% and the like itself ($env:...), so no folder name goes
+ * through cmd.exe's parsing. No double quotes inside: cmd.exe would end the quoted -Command there.
+ * PowerShell is named by its full path: cmd.exe looks in the current folder before PATH.
+ * @param {string} body
+ */
+const ps = (body) => `"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -NoProfile -NonInteractive -Command "$ErrorActionPreference = 'Stop'; ${body}"`;
+/**
  * A PowerShell command on the user's own PATH (HKCU\Environment), for cmd.exe: setx would cut a PATH at
  * 1024 characters, and [Environment]::SetEnvironmentVariable would rewrite %VAR% entries expanded. The
  * value is read and written as is (an ExpandString), then setting an unused variable to nothing makes
- * Windows tell new terminals that the environment changed. No double quotes inside: cmd.exe would end the
- * quoted -Command there.
- * @param {string} body  PowerShell with $d (xo's Scripts folder), $k (the key) and $parts (PATH's entries)
+ * Windows tell new terminals that the environment changed. xo's entry is any that names its folder once
+ * expanded, with or without a last \ (as detect counts it): %USERPROFILE%\.xo\Scripts too.
+ * @param {string} body  PowerShell with $d (xo's Scripts folder), $k (the key), $parts (PATH's entries)
+ *   and $ours (the entries that are xo's)
  */
-const userPath = (body) => "powershell -NoProfile -Command \"$d = Join-Path $env:USERPROFILE '.xo\\Scripts'; " +
+const userPath = (body) => ps("$d = Join-Path $env:USERPROFILE '.xo\\Scripts'; " +
   "$k = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment'); " +
   "$parts = @([string]$k.GetValue('Path', '', 'DoNotExpandEnvironmentNames') -split ';' | Where-Object { $_ }); " +
-  body + "\"";
+  "$ours = @($parts | Where-Object { [Environment]::ExpandEnvironmentVariables($_).TrimEnd('\\') -eq $d }); " +
+  body);
 const TELL = "[Environment]::SetEnvironmentVariable('QQ_SETUP_UNUSED', $null, 'User')";
 
 /** xo on Windows, as cmd.exe commands: the same venv, pin and logout as XO, in Windows' folders. */
@@ -99,17 +110,27 @@ export const XO_WIN = {
   install: { what: XO.install.what,
     cmd: `"%QQ_PYTHON%" -m venv --clear "%USERPROFILE%\\.xo" && "${XO_WIN_BIN}\\python.exe" -m pip install -q --disable-pip-version-check "${XO_SPEC}" && "${XO_WIN_BIN}\\xo.exe" --version` },
   path: { what: "Put xo on your PATH (your Windows user PATH; open a new terminal afterwards)",
-    cmd: userPath(`if ($parts -notcontains $d) { $k.SetValue('Path', (@($parts) + $d) -join ';', 'ExpandString'); ${TELL} }; ` +
+    cmd: userPath(`if (-not $ours.Count) { $k.SetValue('Path', (@($parts) + $d) -join ';', 'ExpandString'); ${TELL} }; ` +
       "Write-Output ($d + ' is on your user PATH; open a new terminal')") },
   update: { what: XO.update.what,
     cmd: `"${XO_WIN_BIN}\\python.exe" -m pip install --force-reinstall --no-deps "${XO_SPEC}"` },
   remove: [
-    // As XO.remove: when xo cannot run, delete the files xo logout deletes (with XDG_CONFIG_HOME unset).
+    // As XO.remove: when xo cannot run, delete the files xo logout deletes: xo/credentials and xo/services
+    // in %XDG_CONFIG_HOME% when that is absolute (as Python 3.11 and 3.12's os.path.isabs; 3.13 differs only
+    // for one leading \), else in %USERPROFILE%\.config. PowerShell reads both itself: in cmd.exe an
+    // unquoted %USERPROFILE% with ) or & in it would break the line. A folder there is left, as xo leaves it.
     { what: XO.remove[0].what,
-      cmd: `"${XO_WIN_BIN}\\xo.exe" logout || (del /f /q "%USERPROFILE%\\.config\\xo\\credentials" "%USERPROFILE%\\.config\\xo\\services" 2>nul & echo xo logout did not run; deleted the key files in %USERPROFILE%\\.config\\xo instead)` },
-    { what: XO.remove[1].what, cmd: `rmdir /s /q "%USERPROFILE%\\.xo"` },
+      cmd: `"${XO_WIN_BIN}\\xo.exe" logout || ` + ps("$b = [string]$env:XDG_CONFIG_HOME; " +
+        "$c = if ($b -match '^([A-Za-z]:)?[\\\\/]') { Join-Path $b 'xo' } else { Join-Path $env:USERPROFILE '.config\\xo' }; " +
+        "foreach ($f in 'credentials', 'services') { $p = Join-Path $c $f; if (Test-Path -LiteralPath $p -PathType Leaf) { Remove-Item -LiteralPath $p -Force } }; " +
+        "Write-Output ('xo logout did not run; deleted ' + (Join-Path $c 'credentials') + ' and ' + (Join-Path $c 'services') + ' instead')") },
+    // rmdir can exit 0 and leave files it could not delete (one in use, as xo.exe running in another
+    // terminal): then this step fails, so the PATH entry stays and "Done" is not printed. No path in the
+    // ( ) block: an unquoted %USERPROFILE% with ) in it would end it.
+    { what: XO.remove[1].what,
+      cmd: `rmdir /s /q "%USERPROFILE%\\.xo" & if exist "%USERPROFILE%\\.xo\\" (echo xo's folder is still there, likely a file in it is in use: close any terminal running xo, then remove xo again& exit /b 1) else (call )` },
     { what: "Take xo off your PATH (your Windows user PATH)",
-      cmd: userPath(`if ($parts -contains $d) { $k.SetValue('Path', (@($parts | Where-Object { $_ -ne $d })) -join ';', 'ExpandString'); ${TELL} }; ` +
+      cmd: userPath(`if ($ours.Count) { $k.SetValue('Path', (@($parts | Where-Object { $ours -notcontains $_ })) -join ';', 'ExpandString'); ${TELL} }; ` +
         "Write-Output ($d + ' is not on your user PATH')") },
   ],
 };
@@ -262,7 +283,7 @@ async function detectWindows(home, run) {
   const xoHere = xoVenv && existsSync(xoBin) && (await xoRuns());
   const pin = xoHere ? pinIn(await run(join(venv, "Scripts", "pip.exe"), ["freeze", "--disable-pip-version-check"]), "quirq-xo") : null;
   // The user PATH as stored: an entry naming .xo\Scripts, expanded or written with %USERPROFILE%.
-  const userPath = (await run("reg", ["query", "HKCU\\Environment", "/v", "Path"])) ?? "";
+  const userPath = (await run(systemExe("reg.exe"), ["query", "HKCU\\Environment", "/v", "Path"])) ?? "";
   const onPath = /\\\.xo\\Scripts\\?(;|\s|$)/i.test(userPath);
   const note = xoHere && pin !== XO_PIN
     ? `xo is ${pin ? `at ${pin.slice(0, 7)}` : "at a commit pip does not name"}, not setup's pin ${XO_PIN.slice(0, 7)}; updating would put it at ${XO_PIN.slice(0, 7)}`
@@ -273,6 +294,27 @@ async function detectWindows(home, run) {
     xo: { installed: xoHere, broken: xoVenv && !xoHere, foreign: existsSync(venv) && !xoVenv, pin, onPath,
       behind: xoHere && !onPath ? [NOT_ON_PATH] : [], note },
   };
+}
+
+/** A program in Windows' System32, by full path. @param {string} name @param {NodeJS.ProcessEnv} [env] */
+export function systemExe(name, env = process.env) {
+  return win32.join(env.SystemRoot || "C:\\Windows", "System32", name);
+}
+
+/**
+ * On Windows, the full path of name.exe in the PATH's folders, or null. Windows (libuv, cmd.exe) looks in
+ * the current folder first, so a python.exe in the folder qq-setup started in would run; a full path
+ * never does. Relative PATH entries are skipped for the same reason.
+ * @param {string} name @param {NodeJS.ProcessEnv} env @returns {string | null}
+ */
+export function findExe(name, env) {
+  for (const raw of String(env.Path ?? env.PATH ?? "").split(delimiter)) {
+    const dir = raw.replace(/^"(.*)"$/, "$1");
+    if (!dir || !isAbsolute(dir)) continue;
+    const file = join(dir, `${name}.exe`);
+    if (existsSync(file)) return file;
+  }
+  return null;
 }
 
 /** @param {string | null} out  `python --version` output @param {number[]} [min] */
@@ -291,18 +333,23 @@ export function pythonOk(out, min = [3, 11, 4]) {
  * @param {NodeJS.ProcessEnv} env @param {number[]} min @param {Read} [run] @param {string} [platform]
  * @returns {Promise<PythonPick>}
  */
-export async function pickPython(env, min, run = read, platform = process.platform) {
+export async function pickPython(env, min, run = read, platform = process.platform, find = findExe) {
+  const win = platform === "win32";
+  // On Windows a bare name is looked up in PATH's folders only (findExe), and the step gets the full path.
+  const where = (/** @type {string} */ n) => (win && !/[\\/]/.test(n) ? find(n.replace(/\.exe$/i, ""), env) : n);
   if (env.QQ_PYTHON) {
-    const version = (await run(env.QQ_PYTHON, ["--version"], env))?.trim() || null;
-    return { cmd: env.QQ_PYTHON, version, ok: pythonOk(version, min), persist: false };
+    const at = where(env.QQ_PYTHON);
+    const version = at ? (await run(at, ["--version"], env))?.trim() || null : null;
+    return { cmd: at ?? env.QQ_PYTHON, version, ok: pythonOk(version, min), persist: false };
   }
   /** @type {string | null} */
   let first = null;
-  const names = platform === "win32" ? ["python", "py"] : ["python3", "python3.14", "python3.13", "python3.12", "python3.11"];
-  for (const cmd of names) {
-    const version = (await run(cmd, ["--version"], env))?.trim() || null;
-    if (cmd === names[0]) first = version;
-    if (pythonOk(version, min)) return { cmd, version, ok: true, persist: platform !== "win32" && cmd !== "python3" };
+  const names = win ? ["python", "py"] : ["python3", "python3.14", "python3.13", "python3.12", "python3.11"];
+  for (const name of names) {
+    const cmd = where(name);
+    const version = cmd ? (await run(cmd, ["--version"], env))?.trim() || null : null;
+    if (name === names[0]) first = version;
+    if (cmd && pythonOk(version, min)) return { cmd, version, ok: true, persist: !win && cmd !== "python3" };
   }
   return { cmd: null, version: first, ok: false, persist: false };
 }
@@ -485,8 +532,9 @@ export function describe(s) {
           : s.qq.latest ? (s.qq.latest === s.qq.commit ? " (the newest)" : `, newest is ${s.qq.latest.slice(0, 7)}`) : " (could not check the newest)") +
         `; qqsync ${s.qq.syncPin ? `at ${s.qq.syncPin.slice(0, 7)}` : "missing"}` +
         `; ${s.qq.onPath ? "on PATH" : "not on PATH"}` + (pathOnly(s.qq) ? ": needs its PATH step" : s.qq.behind.length ? ": update available" : s.qq.localWork ? "" : ": up to date");
-  const xo = s.xo.foreign ? "~/.xo is there but is not an xo install (no pyvenv.cfg); it is left alone"
-    : s.xo.broken ? "not working: ~/.xo is xo's venv but its xo does not run"
+  const dir = s.qq.unsupported ? "%USERPROFILE%\\.xo" : "~/.xo";
+  const xo = s.xo.foreign ? `${dir} is there but is not an xo install (no pyvenv.cfg); it is left alone`
+    : s.xo.broken ? `not working: ${dir} is xo's venv but its xo does not run`
     : !s.xo.installed ? "not installed"
       : `installed at ${s.xo.pin?.slice(0, 7) ?? "an unknown commit"}; ${s.xo.onPath ? "on PATH" : "not on PATH"}` +
         (s.xo.pin !== XO_PIN ? `: not at setup's pin (${XO_PIN.slice(0, 7)})` : pathOnly(s.xo) ? ": needs its PATH step" : s.xo.behind.length ? ": update available" : ": up to date");
@@ -513,11 +561,15 @@ export function defaultAction(t, flags) {
 }
 
 /**
- * How one step runs: in sh, or in cmd.exe on Windows (Node's shell there: %ComSpec% /d /s /c).
- * @param {string} cmd @param {string} [platform] @returns {[string, string[], { shell?: boolean }]}
+ * How one step runs: in sh, or in cmd.exe on Windows, as Node's shell: true runs it (%ComSpec% /d /s /c "…")
+ * plus /v:off, so a DelayedExpansion registry setting cannot eat a ! in a folder name.
+ * @param {string} cmd @param {string} [platform] @param {NodeJS.ProcessEnv} [env]
+ * @returns {[string, string[], { windowsVerbatimArguments?: boolean }]}
  */
-export function stepCommand(cmd, platform = process.platform) {
-  return platform === "win32" ? [cmd, [], { shell: true }] : ["/bin/sh", ["-c", cmd], {}];
+export function stepCommand(cmd, platform = process.platform, env = process.env) {
+  return platform === "win32"
+    ? [env.ComSpec || systemExe("cmd.exe", env), ["/d", "/v:off", "/s", "/c", `"${cmd}"`], { windowsVerbatimArguments: true }]
+    : ["/bin/sh", ["-c", cmd], {}];
 }
 
 /** Run one step in sh (cmd.exe on Windows), showing its output; resolves to its exit code. @param {string} cmd @param {NodeJS.ProcessEnv} env */
@@ -636,7 +688,7 @@ export async function main(argv, io = realIo()) {
       const work = tool === "qq" ? state.qq.localWork : null;
       const note = tool === "xo" ? state.xo.note : null;
       if (tool === "xo" && state.xo.foreign) {
-        out("  xo: ~/.xo is not an xo install, so it is left alone. Move it away first to install xo there.");
+        out(`  xo: ${windows ? "%USERPROFILE%\\.xo" : "~/.xo"} is not an xo install, so it is left alone. Move it away first to install xo there.`);
         continue;
       }
       if (work) out(`  ${tool}: ~/qq-tools/depot has ${work}; reinstalling, updating or removing qq deletes them.`);
@@ -700,7 +752,7 @@ export async function main(argv, io = realIo()) {
         return 2;
       }
     }
-    out("\nDone. Open a new terminal so PATH (and QQ_PYTHON) take effect.");
+    out(windows ? "\nDone. Open a new terminal so PATH takes effect." : "\nDone. Open a new terminal so PATH (and QQ_PYTHON) take effect.");
     if (actions.xo === "install") out("Then log xo in with your XO API key:  xo login");
     for (const line of afterNotes(actions, home)) out(line);
     return 0;

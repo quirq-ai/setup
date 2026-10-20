@@ -510,7 +510,7 @@ test("this machine: a ~/.xo that is not xo's is left alone, and the form opens w
   const page = await browser.newPage();
   try {
     await page.goto(cli.url);
-    await expect(page.getByText("Move ~/.xo away to install xo here; qq-setup leaves it alone.")).toBeVisible();
+    await expect(page.getByText("Move the .xo folder in your home folder away to install xo here; qq-setup leaves it alone.")).toBeVisible();
     await expect(page.getByRole("radiogroup", { name: "What to do with xo" })).toHaveCount(0);
     await expect(page.getByRole("radiogroup", { name: "Your org" })).toHaveCount(0);
     await expect(page.getByText(/Needs GitHub, which is not ready/)).toBeVisible();
@@ -551,7 +551,7 @@ test("this machine: a choice made after the machine changed shows what is there 
     // click, not check: the page looks again at once, and the radio it clicked goes away.
     await xo.getByRole("radio", { name: "Remove" }).click();
     await expect(page.getByText(/this machine changed since the page looked at it.*Pick again/)).toBeVisible();
-    await expect(page.getByText("Move ~/.xo away to install xo here; qq-setup leaves it alone.")).toBeVisible();
+    await expect(page.getByText("Move the .xo folder in your home folder away to install xo here; qq-setup leaves it alone.")).toBeVisible();
     await expect(page.getByRole("button", { name: "Run" })).toBeDisabled();
     expect(existsSync(join(home, ".xo"))).toBe(true);
   } finally {
@@ -598,7 +598,8 @@ test("this machine: on Windows the page installs xo with cmd.exe steps and says 
   // The CLI believes it runs on Windows, with USERPROFILE as its home and a stand-in python.
   const asWindows = "data:text/javascript,Object.defineProperty(process,'platform',{value:'win32'})";
   const bin = mkdtempSync(join(tmpdir(), "qq-setup-e2e-winpy-"));
-  writeFileSync(join(bin, "python"), "#!/bin/sh\necho 'Python 3.13.16'\n", { mode: 0o755 });
+  // python.exe: on Windows qq-setup runs Python by its full path in PATH's folders, as name.exe.
+  writeFileSync(join(bin, "python.exe"), "#!/bin/sh\necho 'Python 3.13.16'\n", { mode: 0o755 });
   const cli = await startCli({ NODE_OPTIONS: `--import=${asWindows}`, INIT_CWD: "C:\\Users\\sam",
     PATH: `${bin}:${join(ROOT, "tests", "fake-gh")}:${process.env.PATH}` });
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
@@ -617,7 +618,7 @@ test("this machine: on Windows the page installs xo with cmd.exe steps and says 
     // xo: Install gives the cmd.exe steps, run in the home folder (USERPROFILE).
     await page.getByRole("radiogroup", { name: "What to do with xo" }).getByRole("radio", { name: "Install", exact: true }).check();
     await expect(page.getByText(/^"%QQ_PYTHON%" -m venv --clear "%USERPROFILE%\\\.xo" && /)).toBeVisible();
-    await expect(page.getByText(/^powershell -NoProfile -Command "\$d = Join-Path \$env:USERPROFILE '\.xo\\Scripts'/)).toBeVisible();
+    await expect(page.getByText(/^"%SystemRoot%\\System32\\WindowsPowerShell\\v1\.0\\powershell\.exe" -NoProfile -NonInteractive -Command "\$ErrorActionPreference = 'Stop'; \$d = Join-Path \$env:USERPROFILE '\.xo\\Scripts'/)).toBeVisible();
     await expect(page.getByRole("button", { name: "Run these 2 steps" })).toBeEnabled();
     // The terminal says the same about qq; step 2 still works.
     expect(cli.output()).toContain("note  Windows: qq runs on Linux and macOS, so qq-setup cannot install it on Windows");
