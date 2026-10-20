@@ -86,13 +86,22 @@ export function checks(seen) {
   return out;
 }
 
-/** @param {string} cmd @param {string[]} args @returns {Promise<string | null>} first line of output, or null */
-function version(cmd, args) {
+/**
+ * The first line a program prints, or null when it cannot run. Some failures throw instead of calling
+ * back (a QQ_PYTHON naming a .bat, such as a pyenv-win shim, or a python.exe policy blocks), and must
+ * not end qq-setup before the form opens.
+ * @param {string} cmd @param {string[]} args @returns {Promise<string | null>}
+ */
+export function version(cmd, args) {
   return new Promise((ok) => {
-    execFile(cmd, args, { timeout: 10_000 }, (err, stdout, stderr) => {
-      if (err) return ok(null);
-      ok((String(stdout).trim() || String(stderr).trim()).split("\n")[0] || null);
-    });
+    try {
+      execFile(cmd, args, { timeout: 10_000 }, (err, stdout, stderr) => {
+        if (err) return ok(null);
+        ok((String(stdout).trim() || String(stderr).trim()).split("\n")[0] || null);
+      });
+    } catch {
+      ok(null);
+    }
   });
 }
 

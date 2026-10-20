@@ -12,7 +12,7 @@ import { test } from "node:test";
 import { detectKinds } from "../cli/detect.mjs";
 import { encodeRef, ghEnv, GhError, isName } from "../cli/gh.mjs";
 import { buildPlan, checkAnswers } from "../cli/plan.mjs";
-import { checks, pythonAt } from "../cli/preflight.mjs";
+import { checks, pythonAt, version } from "../cli/preflight.mjs";
 import { listRepos } from "../cli/facts.mjs";
 import { classicFromError, protectionWarnings } from "../cli/protection.mjs";
 import { installFor, MAC, MAC_PYTHON } from "../cli/tools.mjs";
@@ -128,7 +128,7 @@ test("buildPlan names every write, and what v0 leaves out", () => {
   assert.match(buildPlan({ org: "acme", repos: ["api"], starter: null }, repos, true).does[1], /^Update acme\/qq-config \(only if setup created it; otherwise setup stops\)/);
 });
 
-test("preflight checks: token variables, scopes, Python and macOS", () => {
+test("preflight checks: token variables, scopes, Python and macOS", async () => {
   const base = { node: "v24.1.0", platform: "linux", env: {}, git: "git version 2.50", gh: "gh version 2.89",
     python: "Python 3.14.8", pythonCmd: "python3", login: "sam", scopes: ["repo", "workflow", "read:org", "gist"], loginError: null };
   assert.ok(checks(base).every((c) => c.ok));
@@ -176,6 +176,9 @@ test("preflight checks: token variables, scopes, Python and macOS", () => {
     "not found (python); xo needs Python 3.11 or newer. qq-setup found py (Python 3.13.1): installing xo here uses it");
   assert.match(winLine({ python: "Python 3.10.11" })?.detail ?? "", /; xo needs Python 3\.11 or newer\. Install Python 3\.13 from python\.org /);
   assert.equal(checks({ ...base, platform: "win32" }).some((c) => c.name === "Python 3.11.4+" || /QQ_PYTHON to it/.test(c.detail)), false);
+  // A program that cannot even start (execFile throws: here a NUL in the name; on Windows a .bat
+  // QQ_PYTHON or a blocked python.exe) reads as not found, never a crash before the form opens.
+  assert.equal(await version("a\0b", ["--version"]), null);
   // The Python preflight runs on Windows: by full path from PATH's folders, never a bare name.
   const pyBin = mkdtempSync(join(tmpdir(), "qq-setup-pf-win-"));
   writeFileSync(join(pyBin, "python.exe"), "");
