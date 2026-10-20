@@ -5,6 +5,7 @@
 import { execFile } from "node:child_process";
 import { TOKEN_VARS, whoami } from "./gh.mjs";
 import { MAC, MAC_PYTHON, qqPython } from "./tools.mjs";
+import { windowsNote } from "./windows.mjs";
 
 /** What this read-only build needs: `gh auth login` grants both (with gist, which setup never uses). */
 export const NEEDED_SCOPES = ["repo", "read:org"];
@@ -17,7 +18,7 @@ export const LATER_SCOPES = ["workflow"];
 
 /**
  * Pure: turn what was observed into checks.
- * @param {{ node: string, platform: string, env: Record<string, string | undefined>,
+ * @param {{ node: string, platform: string, env: Record<string, string | undefined>, cwd?: string,
  *   git: string | null, gh: string | null, python: string | null, pythonCmd: string,
  *   login: string | null, scopes: string[] | null, loginError: string | null }} seen
  * @returns {Check[]}
@@ -76,7 +77,7 @@ export function checks(seen) {
     out.push({ name: "macOS", ok: true, fatal: false,
       detail: `setup works here. ${MAC}` });
   } else if (seen.platform === "win32") {
-    out.push({ name: "Windows", ok: false, fatal: false, detail: "qq-setup installs qq and xo on Linux and macOS only. To try WSL, install Node 22 or newer inside it and run this command there (not tested in WSL)" });
+    out.push({ name: "Windows", ok: false, fatal: false, detail: `qq-setup installs qq and xo on Linux and macOS only. ${windowsNote(seen.env, seen.cwd ?? "")}` });
   }
   return out;
 }
@@ -108,6 +109,6 @@ export async function preflight() {
       if (/gh auth login|GH_TOKEN/.test(loginError)) loginError = "not logged in"; // the detail adds the fix
     }
   }
-  return checks({ node: process.version, platform: process.platform, env: process.env,
+  return checks({ node: process.version, platform: process.platform, env: process.env, cwd: process.cwd(),
     git, gh: ghv, python, pythonCmd, login, scopes, loginError });
 }

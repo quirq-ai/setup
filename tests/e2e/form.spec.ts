@@ -596,7 +596,7 @@ test("this machine: the form cannot close under a run, and no run starts once th
 test("this machine: on Windows the page says plainly that qq-setup cannot install qq or xo there", async ({ browser }) => {
   // The CLI believes it runs on Windows; HOME is still an absolute POSIX path, so only the platform turns the panel off.
   const asWindows = "data:text/javascript,Object.defineProperty(process,'platform',{value:'win32'})";
-  const cli = await startCli({ NODE_OPTIONS: `--import=${asWindows}` });
+  const cli = await startCli({ NODE_OPTIONS: `--import=${asWindows}`, INIT_CWD: "C:\\Users\\sam" });
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   try {
     await page.goto(cli.url);
@@ -624,6 +624,29 @@ test("this machine: on Windows the page says plainly that qq-setup cannot instal
     expect(start.body.error).toMatch(/shell commands for Linux and macOS/);
     mkdirSync(SHOTS, { recursive: true });
     await page.screenshot({ path: join(SHOTS, "windows-390.png"), fullPage: true });
+  } finally {
+    cli.proc.kill();
+    await page.close();
+  }
+});
+
+test("this machine: Windows' Node started in WSL is told so, not sent back to WSL", async ({ browser }) => {
+  // What suraj hit: WSL found Windows' npx on PATH, and that npx started in \\wsl.localhost\.... npx runs
+  // qq-setup through cmd.exe, which cannot stay in a \\wsl folder and moves to C:\Windows (here: this test's
+  // own folder, which is not a WSL one either); npm passes the folder npx started in as INIT_CWD.
+  const asWindows = "data:text/javascript,Object.defineProperty(process,'platform',{value:'win32'})";
+  const cli = await startCli({ NODE_OPTIONS: `--import=${asWindows}`, INIT_CWD: "\\\\wsl.localhost\\Ubuntu\\home\\surshar" });
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  try {
+    await page.goto(cli.url);
+    await expect(page.getByText(/^This is a WSL terminal, but it ran Windows' Node/)).toBeVisible();
+    await expect(page.getByText(/check that the command\s+which npx\s+prints a path that does not start with \/mnt\//)).toBeVisible();
+    // Nothing to paste with backticks, which a shell would run.
+    await expect(page.getByText(/`/)).toHaveCount(0);
+    await expect(page.getByText(/To try them on this PC, use WSL/)).toHaveCount(0);
+    expect(cli.output()).toContain("note  Windows: qq-setup installs qq and xo on Linux and macOS only. This is a WSL terminal");
+    mkdirSync(SHOTS, { recursive: true });
+    await page.screenshot({ path: join(SHOTS, "windows-wsl-390.png"), fullPage: true });
   } finally {
     cli.proc.kill();
     await page.close();

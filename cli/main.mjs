@@ -17,6 +17,7 @@ import { protectionWarnings, readProtection } from "./protection.mjs";
 import { openerBase, openFile, writeOpener } from "./opener.mjs";
 import { machine } from "./machine.mjs";
 import { startServer } from "./server.mjs";
+import { windowsNote } from "./windows.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
@@ -130,9 +131,7 @@ async function main(argv = process.argv.slice(2)) {
   const here = !windows && home.startsWith("/") ? machine({ home, env: process.env, platform: process.platform,
     echo: (t) => process.stdout.write(t) }) : null;
   const noHome = windows
-    ? { error: "qq-setup's install steps are shell commands for Linux and macOS, and qq runs on Linux and macOS. " +
-        "To try them on this PC, use WSL, which gives Windows a Linux terminal: install Node 22 or newer inside WSL, " +
-        "then run the same command there. qq-setup is not tested in WSL.", unsupported: true }
+    ? { error: windowsNote(process.env, process.cwd()), unsupported: true }
     : { error: "HOME must be set to an absolute path for qq-setup to install anything" };
   const form = await startServer({
     root: join(ROOT, "out"),
