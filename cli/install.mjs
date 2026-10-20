@@ -12,6 +12,7 @@ import { execFile, spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { INSTALL, MAC_PYTHON } from "./tools.mjs";
+import { windowsNote } from "./windows.mjs";
 
 /** The qq guide's "Remove everything" commands (quirq-ai/docs content/docs/install.mdx, at 3f8df0d). */
 export const QQ_REMOVE = [
@@ -474,7 +475,7 @@ export async function main(argv, io = realIo()) {
     else return err(`qq-setup install: unknown option ${a}${a === "--only" ? " (use --only qq or --only xo)" : ""}\n\n${USAGE}`), 2;
   }
   if (f.update && f.remove) return err("qq-setup install: --update and --remove do not go together"), 2;
-  if (io.platform === "win32") return err("qq-setup install: qq and xo install on Linux and macOS only"), 1;
+  if (io.platform === "win32") return err(`qq-setup install: qq and xo install on Linux and macOS only. ${windowsNote(process.cwd())}`), 1;
 
   const home = io.env.HOME;
   // Every step names ~: a relative HOME would aim rm -rf at the current folder.
