@@ -390,6 +390,11 @@ test("windows: pickPython tries python, then the py launcher, by full path, and 
   assert.deepEqual(ran, []);
 });
 
+test("read: a program that cannot even start gives null, never a throw", async () => {
+  // execFile throws for some failures (here a NUL in the name; on Windows, spawn EBUSY for a held xo.exe).
+  assert.equal(await read("a\0b", ["--version"]), null);
+});
+
 test("windows: findExe looks in PATH's absolute folders only, never the current one", () => {
   const bin = winBin();
   const env = { PATH: ["", ".", "relative", bin].join(delimiter) };

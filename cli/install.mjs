@@ -155,10 +155,18 @@ export const SYNC_PIN = /** @type {string} */ (/sync@([0-9a-f]{40})/.exec(INSTAL
  * @typedef {(file: string, args: string[], env?: NodeJS.ProcessEnv) => Promise<string | null>} Read
  */
 
-/** Run a program and return its stdout, or null when it is missing, fails or takes too long. @type {Read} */
+/**
+ * Run a program and return its stdout, or null when it is missing, fails or takes too long. Some failures
+ * throw instead of calling back: on Windows, spawn EBUSY for an xo.exe another program holds open.
+ * @type {Read}
+ */
 export function read(file, args, env = process.env) {
   return new Promise((ok) => {
-    execFile(file, args, { timeout: 30_000, env }, (err, stdout) => ok(err ? null : String(stdout)));
+    try {
+      execFile(file, args, { timeout: 30_000, env }, (err, stdout) => ok(err ? null : String(stdout)));
+    } catch {
+      ok(null);
+    }
   });
 }
 
