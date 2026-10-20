@@ -16,7 +16,8 @@ export function fromWsl(folder) {
 }
 
 // No backticks: pasted into bash, `which npx` runs whatever which prints.
-const CHECK = "check that the command  which npx  prints a path that does not start with /mnt/";
+const CHECK = "check that the command  which npx  prints a path that does not start with /mnt/ " +
+  "(if it prints nothing, Node is not installed inside WSL yet)";
 
 /**
  * The one explanation, for the page, `install` and the terminal note.

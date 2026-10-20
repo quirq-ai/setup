@@ -29,7 +29,7 @@ test("windows: npx's folder counts, since npx runs qq-setup through cmd.exe, whi
 
 test("windows: in WSL the note says how to check npx, never to go and use WSL, and nothing to paste with backticks", () => {
   const note = windowsNote({ INIT_CWD: WSL }, "C:\\Windows");
-  assert.match(note, /Install Node 22 or newer inside WSL, open a new WSL terminal, check that the command {2}which npx {2}prints a path that does not start with \/mnt\/, then run qq-setup's command again\./);
+  assert.match(note, /Install Node 22 or newer inside WSL, open a new WSL terminal, check that the command {2}which npx {2}prints a path that does not start with \/mnt\/ \(if it prints nothing, Node is not installed inside WSL yet\), then run qq-setup's command again\./);
   assert.doesNotMatch(note, /which node/);
   for (const n of [note, windowsNote({}, "C:\\Users\\a")]) assert.doesNotMatch(n, /`/);
 });
@@ -38,6 +38,8 @@ test("windows: from a Windows folder the note points to WSL and covers having al
   const note = windowsNote({}, "C:\\Users\\a");
   assert.match(note, /To try them on this PC, use WSL/);
   assert.match(note, /If you already ran it in WSL, it ran Windows' Node: .*which npx/);
+  // Sent to WSL from here, which npx prints nothing at first: the note says what that means.
+  assert.match(note, /which npx {2}prints a path that does not start with \/mnt\/ \(if it prints nothing, Node is not installed inside WSL yet\), then run qq-setup's command again\.$/);
 });
 
 test("windows: the terminal's Windows line uses what preflight saw, not this test's own folder", () => {
