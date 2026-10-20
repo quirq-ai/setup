@@ -252,6 +252,17 @@ async function drive(argv, { home, answers = [], tty = true, platform = "linux",
   return { code, ...r };
 }
 
+test("main: on Windows, install refuses before looking, and says when npx was started in WSL", async () => {
+  const home = fakeHome();
+  const wsl = await drive(["--yes"], { home, platform: "win32", env: { INIT_CWD: "\\\\wsl.localhost\\Ubuntu\\home\\a" } });
+  assert.equal(wsl.code, 1);
+  assert.deepEqual(wsl.steps, []);
+  assert.match(wsl.out.join("\n"), /^qq-setup install: qq and xo install on Linux and macOS only\. This is a WSL terminal, but it ran Windows' Node/);
+  const win = await drive(["--yes"], { home, platform: "win32", env: { INIT_CWD: "C:\\Users\\a" } });
+  assert.equal(win.code, 1);
+  assert.match(win.out.join("\n"), /only\. qq-setup's install steps are shell commands .*To try them on this PC, use WSL/);
+});
+
 test("main: Enter never removes, and Enter at 'Run them now?' runs nothing", async () => {
   const home = fakeHome();
   writeFileSync(join(home, ".zshrc"), `export PATH="$HOME/qq-tools/bin:$PATH"\n${XO_PATH_LINE}\n`);

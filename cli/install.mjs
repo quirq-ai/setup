@@ -475,7 +475,7 @@ export async function main(argv, io = realIo()) {
     else return err(`qq-setup install: unknown option ${a}${a === "--only" ? " (use --only qq or --only xo)" : ""}\n\n${USAGE}`), 2;
   }
   if (f.update && f.remove) return err("qq-setup install: --update and --remove do not go together"), 2;
-  if (io.platform === "win32") return err(`qq-setup install: qq and xo install on Linux and macOS only. ${windowsNote(process.cwd())}`), 1;
+  if (io.platform === "win32") return err(`qq-setup install: qq and xo install on Linux and macOS only. ${windowsNote(io.env, process.cwd())}`), 1;
 
   const home = io.env.HOME;
   // Every step names ~: a relative HOME would aim rm -rf at the current folder.

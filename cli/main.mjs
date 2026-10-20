@@ -131,7 +131,7 @@ async function main(argv = process.argv.slice(2)) {
   const here = !windows && home.startsWith("/") ? machine({ home, env: process.env, platform: process.platform,
     echo: (t) => process.stdout.write(t) }) : null;
   const noHome = windows
-    ? { error: windowsNote(process.cwd()), unsupported: true }
+    ? { error: windowsNote(process.env, process.cwd()), unsupported: true }
     : { error: "HOME must be set to an absolute path for qq-setup to install anything" };
   const form = await startServer({
     root: join(ROOT, "out"),
