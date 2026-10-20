@@ -42,10 +42,12 @@ terminal as [`install`](#install-update-or-remove-qq-and-xo).
      starts at Keep (or Don't install), so nothing is installed or removed until you pick it. It
      shows the exact commands for what you picked, and Run runs them here, as you, with their
      output on the page and in the terminal. Removing qq offers its demo folders and its
-     `QQ_PYTHON` line as unticked boxes. "Done: close qq-setup" stops the command. qq-setup
-     installs qq and xo on Linux and macOS only: on Windows this step says so and points to WSL (with
-     Node 22 or newer installed inside it; not tested there), and step 2 still works. Started in WSL
-     with no Linux Node, WSL runs Windows' Node: from a Linux folder this step says that instead, and from a
+     `QQ_PYTHON` line as unticked boxes. "Done: close qq-setup" stops the command. On Windows
+     (run from cmd or PowerShell) this step offers xo only, with cmd.exe steps: a venv in
+     `%USERPROFILE%\.xo`, then `%USERPROFILE%\.xo\Scripts` added to your user PATH (open a new
+     terminal after). qq runs on Linux and macOS, so for qq the step points to WSL (with Node 22 or
+     newer installed inside it; not tested there), and step 2 still works. Started in WSL with no
+     Linux Node, WSL runs Windows' Node: from a Linux folder this step says that instead, and from a
      folder under /mnt/c the Windows text ends with the same check (`which npx` must not print a /mnt/ path).
    - **2. Set up repos in an org you own** (the terminal then does 3 and 4 below). You pick an org you own, the repos to put under qq and, optionally, a new starter repo.
    Without a `gh` login, or with no org you own, this step says what to fix instead.
@@ -85,6 +87,13 @@ files only in your home directory, except that on a Mac with no new enough Pytho
 `brew install python@3.13`, which writes to Homebrew's folder. While you are removing a tool, Enter
 at "Install xo?" installs nothing.
 
+On Windows the same command, typed in cmd or PowerShell, handles xo only (qq runs on Linux and
+macOS; `--only qq` stops with how to get it through WSL). It runs cmd.exe commands: xo's venv is
+`%USERPROFILE%\.xo` (programs in its `Scripts` folder), and its PATH entry goes into your user PATH
+in the registry, read and written as it is stored, so other entries keep their `%VAR%` form
+(`setx` is not used: it cuts PATH at 1024 characters). Open a new terminal afterwards. Removing
+deletes the venv and that entry. CI runs the install and remove for real on a Windows runner.
+
 - **qq** (with qqsync) installs with the [qq guide](https://docs.quirq.dev/docs/install)'s three commands.
   Updating reruns them, which deletes and re-clones `~/qq-tools/depot`, so qq is kept when the checkout
   has local work, unless you choose otherwise; `--yes` always keeps it. Local work is what git can
@@ -114,8 +123,10 @@ at "Install xo?" installs nothing.
   and the terminal link uv's install page (https://docs.astral.sh/uv/getting-started/installation/) and
   name `uv python install 3.13`, which needs no sudo; Ubuntu 22.04's own `python3.11` is 3.11.0, too old
   for qq, and a bare `uv python install` gives the newest Python (3.15), which qq-setup does not look for.
-  Once a newer one is there, the terminal's Python line says which one the install step will use. It
-  checks for `git` first.
+  Once a newer one is there, the terminal's Python line says which one the install step will use. On
+  Windows xo uses `python`, else `py`, from your PATH; with neither new enough, nothing runs and the
+  page links https://www.python.org/downloads/windows/ (tick "Add python.exe to PATH" in the
+  installer). It checks for `git` first.
 - `--only qq` or `--only xo` picks one; `--update` or `--remove` answers for every tool; `--yes` asks
   nothing (without a terminal it needs it); `--dry-run` prints the commands and runs nothing.
 

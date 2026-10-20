@@ -7,8 +7,8 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import {
-  BREW_PYTHON, cleanTmp, DEMO, defaultAction, describe, detect, localWork, main, persistPython, pickPython, pinIn, planSteps, PYTHON_HELP, pythonOk,
-  QQ_REMOVE, QQ_REMOVE_TOOLS, read, removeLineCmd, SYNC_PIN, XO, XO_PATH_LINE, XO_PIN, XO_SPEC,
+  BREW_PYTHON, choices, cleanTmp, DEMO, defaultAction, describe, detect, localWork, main, persistPython, pickPython, pinIn, planSteps, PYTHON_HELP, pythonOk,
+  QQ_REMOVE, QQ_REMOVE_TOOLS, read, removeLineCmd, stepCommand, SYNC_PIN, XO, XO_PATH_LINE, XO_PIN, XO_SPEC, XO_WIN,
 } from "../cli/install.mjs";
 import { INSTALL, MAC_PYTHON } from "../cli/tools.mjs";
 
@@ -272,15 +272,99 @@ async function drive(argv, { home, answers = [], tty = true, platform = "linux",
   return { code, ...r };
 }
 
-test("main: on Windows, install refuses before looking, and says when npx was started in WSL", async () => {
-  const home = fakeHome();
-  const wsl = await drive(["--yes"], { home, platform: "win32", env: { INIT_CWD: "\\\\wsl.localhost\\Ubuntu\\home\\a" } });
-  assert.equal(wsl.code, 1);
-  assert.deepEqual(wsl.steps, []);
-  assert.match(wsl.out.join("\n"), /^qq-setup install: qq and xo install on Linux and macOS only\. This is a WSL terminal, but it ran Windows' Node/);
-  const win = await drive(["--yes"], { home, platform: "win32", env: { INIT_CWD: "C:\\Users\\a" } });
-  assert.equal(win.code, 1);
-  assert.match(win.out.join("\n"), /only\. qq-setup's install steps are shell commands .*To try them on this PC, use WSL/);
+/** run() for Windows: python, git, reg query, and xo's Scripts\ programs. @param {{ python?: string | null, git?: boolean, userPath?: string, xo?: boolean }} [o] @returns {any} */
+function winRun({ python = "Python 3.13.16", git = true, userPath = "C:\\Windows\\system32", xo = true } = {}) {
+  return async (/** @type {string} */ file) => {
+    if (file === "git") return git ? "git version 2.51.0.windows.1" : null;
+    if (file === "python") return python;
+    if (file === "reg") return `\r\nHKEY_CURRENT_USER\\Environment\r\n    Path    REG_EXPAND_SZ    ${userPath}\r\n`;
+    if (file.endsWith("xo.exe")) return xo ? "xo 0.1.0\r\n" : null;
+    if (file.endsWith("pip.exe")) return `quirq-xo @ git+https://github.com/quirq-ai/xo@${XO_PIN}\r\n`;
+    return null;
+  };
+}
+
+/** A Windows home with xo's venv (Scripts\xo.exe, pip.exe, pyvenv.cfg). */
+function winHome() {
+  const home = mkdtempSync(join(tmpdir(), "qq-setup-win-"));
+  mkdirSync(join(home, ".xo", "Scripts"), { recursive: true });
+  for (const f of [".xo/Scripts/xo.exe", ".xo/Scripts/pip.exe", ".xo/pyvenv.cfg"]) writeFileSync(join(home, f), "");
+  return home;
+}
+
+test("windows: detect offers nothing for qq and finds xo's venv and its user PATH entry", async () => {
+  const home = winHome();
+  const s = await detect({ home, run: winRun({ userPath: "C:\\Windows;%USERPROFILE%\\.xo\\Scripts" }), platform: "win32" });
+  assert.equal(s.qq.unsupported, true);
+  assert.deepEqual(choices(s.qq), []);
+  assert.equal(defaultAction(s.qq, { update: true }), "keep");
+  assert.match(describe(s)[0], /qq {2}not on Windows: qq runs on Linux and macOS/);
+  assert.deepEqual({ installed: s.xo.installed, onPath: s.xo.onPath, pin: s.xo.pin, behind: s.xo.behind }, { installed: true, onPath: true, pin: XO_PIN, behind: [] });
+  // Expanded or not, with a trailing backslash, any case; another folder ending in .xo\Scripts-ish is not it.
+  for (const p of ["C:\\Users\\a\\.xo\\Scripts", "c:\\users\\a\\.XO\\scripts\;C:\\x"]) {
+    assert.equal((await detect({ home, run: winRun({ userPath: p }), platform: "win32" })).xo.onPath, true, p);
+  }
+  const off = await detect({ home, run: winRun({ userPath: "C:\\Users\\a\\.xo\\Scripts-old;C:\\Windows" }), platform: "win32" });
+  assert.deepEqual(off.xo.behind, ["not on PATH"]);
+  // A venv whose xo.exe does not run is broken: Reinstall rebuilds it.
+  assert.equal((await detect({ home, run: winRun({ xo: false }), platform: "win32" })).xo.broken, true);
+});
+
+test("windows: the steps are cmd.exe commands for xo only, with Windows' Python and git", () => {
+  const none = { qq: { installed: false, broken: false, commit: null, latest: null, syncPin: null, onPath: false, behind: [], localWork: null, pythonLine: null, unsupported: true },
+    xo: { installed: false, broken: false, foreign: false, pin: null, onPath: false, behind: [], note: null } };
+  const py = { cmd: "python", version: "Python 3.13.16", ok: true, persist: false };
+  const go = (/** @type {any} */ actions, /** @type {any} */ o = {}) => planSteps(actions, o.state ?? none, { python: o.python ?? py, platform: "win32", git: o.git ?? true });
+  assert.deepEqual(go({ qq: "keep", xo: "install" }).steps, [XO_WIN.install, XO_WIN.path]);
+  assert.match(XO_WIN.install.cmd, /^"%QQ_PYTHON%" -m venv --clear "%USERPROFILE%\\\.xo" && "%USERPROFILE%\\\.xo\\Scripts\\python\.exe" -m pip install /);
+  assert.ok(XO_WIN.install.cmd.includes(`"${XO_SPEC}"`));
+  for (const s of [XO_WIN.install, XO_WIN.path, XO_WIN.update, ...XO_WIN.remove]) {
+    assert.doesNotMatch(s.cmd, /~\/|\/bin\/|\$HOME/, s.what);
+  }
+  // PowerShell's -Command is one quoted cmd.exe argument: no double quote inside it.
+  for (const s of [XO_WIN.path, XO_WIN.remove[2]]) {
+    const inner = s.cmd.replace(/^powershell -NoProfile -Command "/, "");
+    assert.ok(inner.endsWith('"') && !inner.slice(0, -1).includes('"'), s.what);
+    assert.match(inner, /DoNotExpandEnvironmentNames/);
+    assert.match(inner, /'ExpandString'/);
+  }
+  assert.deepEqual(go({ qq: "keep", xo: "remove" }).steps, XO_WIN.remove);
+  const xoHere = { ...none, xo: { ...none.xo, installed: true, onPath: true, pin: XO_PIN } };
+  assert.deepEqual(go({ qq: "keep", xo: "update" }, { state: xoHere }).steps, [XO_WIN.update]);
+  assert.match(go({ qq: "install", xo: "keep" }).stop ?? "", /qq runs on Linux and macOS, so qq-setup cannot install/);
+  assert.match(go({ qq: "keep", xo: "install" }, { git: false }).stop ?? "", /git is needed to install xo .*https:\/\/git-scm\.com\/downloads\/win/);
+  const old = go({ qq: "keep", xo: "install" }, { python: { cmd: null, version: "Python 3.10.11", ok: false, persist: false } }).stop ?? "";
+  assert.match(old, /^xo needs Python 3\.11 or newer \(found Python 3\.10\.11\)\. Install Python 3\.13 from python\.org \( https:\/\/www\.python\.org\/downloads\/windows\/ \), ticking "Add python\.exe to PATH"/);
+  assert.match(old, /qq-setup then finds python by itself\.$/);
+  // Steps run in cmd.exe there, through Node's shell.
+  assert.deepEqual(stepCommand("echo hi", "win32"), ["echo hi", [], { shell: true }]);
+  assert.deepEqual(stepCommand("echo hi", "linux"), ["/bin/sh", ["-c", "echo hi"], {}]);
+});
+
+test("windows: pickPython tries python, then the py launcher, and never writes QQ_PYTHON", async () => {
+  const run = (/** @type {Record<string, string>} */ v) => async (/** @type {string} */ f) => v[f] ?? null;
+  assert.deepEqual(await pickPython({}, [3, 11, 0], run({ python: "Python 3.13.16" }), "win32"), { cmd: "python", version: "Python 3.13.16", ok: true, persist: false });
+  assert.deepEqual(await pickPython({}, [3, 11, 0], run({ python: "Python 3.10.11", py: "Python 3.12.10" }), "win32"), { cmd: "py", version: "Python 3.12.10", ok: true, persist: false });
+  assert.deepEqual(await pickPython({}, [3, 11, 0], run({}), "win32"), { cmd: null, version: null, ok: false, persist: false });
+});
+
+test("main: on Windows, install looks at xo only, says why not qq, and runs xo's cmd.exe steps", async () => {
+  const home = mkdtempSync(join(tmpdir(), "qq-setup-win-new-"));
+  const env = { USERPROFILE: home, INIT_CWD: "C:\\Users\\a" };
+  const r = await drive(["--yes"], { home, platform: "win32", env, run: winRun({ xo: false }) });
+  assert.equal(r.code, 0);
+  assert.deepEqual(r.steps, [XO_WIN.install.cmd, XO_WIN.path.cmd]);
+  assert.equal(r.envs[0].QQ_PYTHON, "python");
+  assert.ok(r.out.some((l) => /^ {2}qq: qq runs on Linux and macOS, so qq-setup cannot install it on Windows; xo installs here\./.test(l)), r.out.join("\n"));
+  // qq alone: nothing to do on Windows, and the note says so (the WSL one when npx started in WSL).
+  const qq = await drive(["--only", "qq", "--yes"], { home, platform: "win32", env: { ...env, INIT_CWD: "\\\\wsl.localhost\\Ubuntu\\home\\a" }, run: winRun() });
+  assert.equal(qq.code, 1);
+  assert.deepEqual(qq.steps, []);
+  assert.match(qq.out.join("\n"), /^qq-setup install: This is a WSL terminal, but it ran Windows' Node/);
+  // No USERPROFILE: nothing is looked at.
+  const bare = await drive(["--yes"], { home, platform: "win32", env: { USERPROFILE: "" }, run: winRun() });
+  assert.equal(bare.code, 2);
+  assert.match(bare.out.join("\n"), /USERPROFILE must be set to an absolute path/);
 });
 
 test("main: Enter never removes, and Enter at 'Run them now?' runs nothing", async () => {

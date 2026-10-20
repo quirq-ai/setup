@@ -17,7 +17,8 @@ type Cli = { proc: ChildProcess; url: string; output: () => string; exited: Prom
  * "This machine" panel never looks at, or runs anything in, the real one). */
 async function startCli(extra: Record<string, string> = {}): Promise<Cli> {
   const HOME = mkdtempSync(join(tmpdir(), "qq-setup-e2e-home-"));
-  const env: NodeJS.ProcessEnv = { ...process.env, HOME, PATH: `${join(ROOT, "tests", "fake-gh")}:${process.env.PATH}`, NO_COLOR: "1", ...extra };
+  // USERPROFILE: the home folder when a test fakes Windows.
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME, USERPROFILE: HOME, PATH: `${join(ROOT, "tests", "fake-gh")}:${process.env.PATH}`, NO_COLOR: "1", ...extra };
   for (const v of ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"]) delete env[v];
   const proc = spawn(process.execPath, [join(ROOT, "cli", "bin.mjs"), "--no-browser"], { env });
   let out = "";
@@ -593,44 +594,48 @@ test("this machine: the form cannot close under a run, and no run starts once th
   }
 });
 
-test("this machine: on Windows the page says plainly that qq-setup cannot install qq or xo there", async ({ browser }) => {
-  // The CLI believes it runs on Windows; HOME is still an absolute POSIX path, so only the platform turns the panel off.
+test("this machine: on Windows the page installs xo with cmd.exe steps and says why not qq", async ({ browser }) => {
+  // The CLI believes it runs on Windows, with USERPROFILE as its home and a stand-in python.
   const asWindows = "data:text/javascript,Object.defineProperty(process,'platform',{value:'win32'})";
-  const cli = await startCli({ NODE_OPTIONS: `--import=${asWindows}`, INIT_CWD: "C:\\Users\\sam" });
+  const bin = mkdtempSync(join(tmpdir(), "qq-setup-e2e-winpy-"));
+  writeFileSync(join(bin, "python"), "#!/bin/sh\necho 'Python 3.13.16'\n", { mode: 0o755 });
+  const cli = await startCli({ NODE_OPTIONS: `--import=${asWindows}`, INIT_CWD: "C:\\Users\\sam",
+    PATH: `${bin}:${join(ROOT, "tests", "fake-gh")}:${process.env.PATH}` });
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   try {
     await page.goto(cli.url);
-    await expect(page.getByText("qq-setup cannot install qq or xo on Windows", { exact: true })).toBeVisible();
-    await expect(page.getByText(/install Node 22 or newer inside WSL, then run the same command there/)).toBeVisible();
-    // Not the destructive alert: nothing on this PC is broken.
-    await expect(page.locator("[data-slot=alert]").filter({ hasText: "on Windows" })).not.toHaveClass(/text-destructive/);
-    // The terminal says the same.
-    expect(cli.output()).toContain("note  Windows: qq-setup installs qq and xo on Linux and macOS only.");
-    await expect(page.getByText(/HOME must be set/)).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "1. Install, update or remove xo on this machine", exact: true })).toBeVisible();
+    await expect(page.getByText(/^On Windows qq-setup installs xo; qq runs on Linux and macOS/)).toBeVisible();
+    // qq: its line and why, and nothing to pick; nothing tells a Windows user to install qq first.
+    await expect(page.getByText("not on Windows: qq runs on Linux and macOS", { exact: true })).toBeVisible();
+    await expect(page.getByText(/^qq runs on Linux and macOS, so qq-setup cannot install it on Windows; xo installs here\. For qq on this PC, use WSL/)).toBeVisible();
+    await expect(page.getByRole("radiogroup", { name: "What to do with qq" })).toHaveCount(0);
+    await expect(page.getByText(/Start here: qq is not on this machine/)).toHaveCount(0);
+    await expect(page.getByText(/install it in step 1 first/)).toHaveCount(0);
     await expect(page.getByText("Could not look at this machine")).toHaveCount(0);
-    // Nothing else on the page tells a Windows user to install here, and what qq and xo are is still there.
-    await expect(page.getByText(/cannot install qq or xo on Windows \(step 1 says why\)/)).toBeVisible();
-    await expect(page.getByText(/First install qq on this machine/)).toHaveCount(0);
-    await expect(page.getByText(/after you press Run/)).toHaveCount(0);
-    await expect(page.getByRole("heading", { name: "1. qq and xo on this machine", exact: true })).toBeVisible();
     for (const name of ["What is qq?", "What is xo?"]) await expect(page.getByRole("button", { name, exact: true })).toBeVisible();
-    // Step 2 still works: the org and its repos are listed.
+    // xo: Install gives the cmd.exe steps, run in the home folder (USERPROFILE).
+    await page.getByRole("radiogroup", { name: "What to do with xo" }).getByRole("radio", { name: "Install", exact: true }).check();
+    await expect(page.getByText(/^"%QQ_PYTHON%" -m venv --clear "%USERPROFILE%\\\.xo" && /)).toBeVisible();
+    await expect(page.getByText(/^powershell -NoProfile -Command "\$d = Join-Path \$env:USERPROFILE '\.xo\\Scripts'/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Run these 2 steps" })).toBeEnabled();
+    // The terminal says the same about qq; step 2 still works.
+    expect(cli.output()).toContain("note  Windows: qq runs on Linux and macOS, so qq-setup cannot install it on Windows");
     await expect(page.getByText("billing-api", { exact: true })).toBeAttached();
-    const plan = await callApi(page, "/api/machine/plan", { qq: "install", seen: "" });
-    expect(plan.status).toBe(409);
-    expect(plan.body.error).toMatch(/shell commands for Linux and macOS/);
-    const start = await callApi(page, "/api/machine/run", { key: "x" });
-    expect(start.status).toBe(409);
-    expect(start.body.error).toMatch(/shell commands for Linux and macOS/);
+    // qq is refused even if asked for directly.
+    const look = await callApi(page, "/api/machine", undefined);
+    const plan = await callApi(page, "/api/machine/plan", { qq: "install", seen: look.body.seen });
+    expect(plan.status).toBe(400);
     mkdirSync(SHOTS, { recursive: true });
     await page.screenshot({ path: join(SHOTS, "windows-390.png"), fullPage: true });
   } finally {
     cli.proc.kill();
     await page.close();
+    rmSync(bin, { recursive: true, force: true });
   }
 });
 
-test("this machine: Windows' Node started in WSL is told so, not sent back to WSL", async ({ browser }) => {
+test("this machine: Windows' Node started in WSL is told so for qq, and xo still installs", async ({ browser }) => {
   // What suraj hit: WSL found Windows' npx on PATH, and that npx started in \\wsl.localhost\.... npx runs
   // qq-setup through cmd.exe, which cannot stay in a \\wsl folder and moves to C:\Windows (here: this test's
   // own folder, which is not a WSL one either); npm passes the folder npx started in as INIT_CWD.
@@ -643,8 +648,9 @@ test("this machine: Windows' Node started in WSL is told so, not sent back to WS
     await expect(page.getByText(/check that the command\s+which npx\s+prints a path that does not start with \/mnt\//)).toBeVisible();
     // Nothing to paste with backticks, which a shell would run.
     await expect(page.getByText(/`/)).toHaveCount(0);
-    await expect(page.getByText(/To try them on this PC, use WSL/)).toHaveCount(0);
-    expect(cli.output()).toContain("note  Windows: qq-setup installs qq and xo on Linux and macOS only. This is a WSL terminal");
+    await expect(page.getByText(/For qq on this PC, use WSL/)).toHaveCount(0);
+    await expect(page.getByRole("radiogroup", { name: "What to do with xo" })).toBeVisible();
+    expect(cli.output()).toContain("note  Windows: This is a WSL terminal");
     mkdirSync(SHOTS, { recursive: true });
     await page.screenshot({ path: join(SHOTS, "windows-wsl-390.png"), fullPage: true });
   } finally {

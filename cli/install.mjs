@@ -10,7 +10,7 @@
 
 import { execFile, spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, win32 } from "node:path";
 import { INSTALL, MAC_PYTHON } from "./tools.mjs";
 import { windowsNote } from "./windows.mjs";
 
@@ -78,6 +78,42 @@ export const XO = {
   ],
 };
 
+/** xo's programs on Windows: the quickstart's venv at %USERPROFILE%\.xo keeps them in Scripts\. */
+const XO_WIN_BIN = "%USERPROFILE%\\.xo\\Scripts";
+/**
+ * A PowerShell command on the user's own PATH (HKCU\Environment), for cmd.exe: setx would cut a PATH at
+ * 1024 characters, and [Environment]::SetEnvironmentVariable would rewrite %VAR% entries expanded. The
+ * value is read and written as is (an ExpandString), then setting an unused variable to nothing makes
+ * Windows tell new terminals that the environment changed. No double quotes inside: cmd.exe would end the
+ * quoted -Command there.
+ * @param {string} body  PowerShell with $d (xo's Scripts folder), $k (the key) and $parts (PATH's entries)
+ */
+const userPath = (body) => "powershell -NoProfile -Command \"$d = Join-Path $env:USERPROFILE '.xo\\Scripts'; " +
+  "$k = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment'); " +
+  "$parts = @([string]$k.GetValue('Path', '', 'DoNotExpandEnvironmentNames') -split ';' | Where-Object { $_ }); " +
+  body + "\"";
+const TELL = "[Environment]::SetEnvironmentVariable('QQ_SETUP_UNUSED', $null, 'User')";
+
+/** xo on Windows, as cmd.exe commands: the same venv, pin and logout as XO, in Windows' folders. */
+export const XO_WIN = {
+  install: { what: XO.install.what,
+    cmd: `"%QQ_PYTHON%" -m venv --clear "%USERPROFILE%\\.xo" && "${XO_WIN_BIN}\\python.exe" -m pip install -q --disable-pip-version-check "${XO_SPEC}" && "${XO_WIN_BIN}\\xo.exe" --version` },
+  path: { what: "Put xo on your PATH (your Windows user PATH; open a new terminal afterwards)",
+    cmd: userPath(`if ($parts -notcontains $d) { $k.SetValue('Path', (@($parts) + $d) -join ';', 'ExpandString'); ${TELL} }; ` +
+      "Write-Output ($d + ' is on your user PATH; open a new terminal')") },
+  update: { what: XO.update.what,
+    cmd: `"${XO_WIN_BIN}\\python.exe" -m pip install --force-reinstall --no-deps "${XO_SPEC}"` },
+  remove: [
+    // As XO.remove: when xo cannot run, delete the files xo logout deletes (with XDG_CONFIG_HOME unset).
+    { what: XO.remove[0].what,
+      cmd: `"${XO_WIN_BIN}\\xo.exe" logout || (del /f /q "%USERPROFILE%\\.config\\xo\\credentials" "%USERPROFILE%\\.config\\xo\\services" 2>nul & echo xo logout did not run; deleted the key files in %USERPROFILE%\\.config\\xo instead)` },
+    { what: XO.remove[1].what, cmd: `rmdir /s /q "%USERPROFILE%\\.xo"` },
+    { what: "Take xo off your PATH (your Windows user PATH)",
+      cmd: userPath(`if ($parts -contains $d) { $k.SetValue('Path', (@($parts | Where-Object { $_ -ne $d })) -join ';', 'ExpandString'); ${TELL} }; ` +
+        "Write-Output ($d + ' is not on your user PATH')") },
+  ],
+};
+
 /** On a Mac with no new enough Python and only xo wanted: brew's Python without the QQ_PYTHON line. */
 export const BREW_PYTHON = { what: "On a Mac, first install a new enough Python (macOS's python3 is 3.9)",
   cmd: /** @type {string} */ (MAC_PYTHON.cmd.split(" && ")[0]) };
@@ -88,8 +124,9 @@ export const SYNC_PIN = /** @type {string} */ (/sync@([0-9a-f]{40})/.exec(INSTAL
 /**
  * @typedef {{ installed: boolean, broken: boolean, commit: string | null, latest: string | null,
  *   syncPin: string | null, onPath: boolean, behind: string[], localWork: string | null,
- *   pythonLine: { line: string, files: string[] } | null }} QqState
- *   pythonLine: an exact `export QQ_PYTHON=python3.N` line, the form qq-setup and the qq guide write
+ *   pythonLine: { line: string, files: string[] } | null, unsupported?: boolean }} QqState
+ *   pythonLine: an exact `export QQ_PYTHON=python3.N` line, the form qq-setup and the qq guide write;
+ *   unsupported: on Windows, where qq does not run
  * @typedef {{ installed: boolean, broken: boolean, pin: string | null, onPath: boolean, behind: string[],
  *   note: string | null, foreign: boolean }} XoState
  * @typedef {{ qq: QqState, xo: XoState }} State
@@ -171,11 +208,13 @@ export async function localWork(depot, run) {
 /**
  * Look at what is installed. Reads only: files under home, `git status`, `rev-parse`, `rev-list`,
  * `stash list` and `worktree list` in qq's checkout, `pip freeze` in the two venvs, `xo --version`
- * and, unless `latest` is given, `git ls-remote` for qq's newest commit.
- * @param {{ home: string, latest?: string | null, run?: Read }} o
+ * and, unless `latest` is given, `git ls-remote` for qq's newest commit. On Windows only xo is looked
+ * at, and the user PATH (`reg query`).
+ * @param {{ home: string, latest?: string | null, run?: Read, platform?: string }} o
  * @returns {Promise<State>}
  */
-export async function detect({ home, latest, run = read }) {
+export async function detect({ home, latest, run = read, platform = process.platform }) {
+  if (platform === "win32") return detectWindows(home, run);
   const depot = join(home, "qq-tools", "depot");
   const qqHere = existsSync(join(depot, "bin", "qq"));
   const commit = qqHere ? (await run("git", ["-C", depot, "rev-parse", "HEAD"]))?.trim() || null : null;
@@ -214,6 +253,28 @@ export async function detect({ home, latest, run = read }) {
   };
 }
 
+/** On Windows: qq is never offered, and xo is the venv at home\.xo with its programs in Scripts\. @param {string} home @param {Read} run */
+async function detectWindows(home, run) {
+  const venv = join(home, ".xo");
+  const xoBin = join(venv, "Scripts", "xo.exe");
+  const xoVenv = existsSync(join(venv, "pyvenv.cfg"));
+  const xoRuns = async () => (await run(xoBin, ["--version"])) !== null || (await run(xoBin, ["--version"])) !== null;
+  const xoHere = xoVenv && existsSync(xoBin) && (await xoRuns());
+  const pin = xoHere ? pinIn(await run(join(venv, "Scripts", "pip.exe"), ["freeze", "--disable-pip-version-check"]), "quirq-xo") : null;
+  // The user PATH as stored: an entry naming .xo\Scripts, expanded or written with %USERPROFILE%.
+  const userPath = (await run("reg", ["query", "HKCU\\Environment", "/v", "Path"])) ?? "";
+  const onPath = /\\\.xo\\Scripts\\?(;|\s|$)/i.test(userPath);
+  const note = xoHere && pin !== XO_PIN
+    ? `xo is ${pin ? `at ${pin.slice(0, 7)}` : "at a commit pip does not name"}, not setup's pin ${XO_PIN.slice(0, 7)}; updating would put it at ${XO_PIN.slice(0, 7)}`
+    : null;
+  return {
+    qq: { installed: false, broken: false, commit: null, latest: null, syncPin: null, onPath: false, behind: [], localWork: null,
+      pythonLine: null, unsupported: true },
+    xo: { installed: xoHere, broken: xoVenv && !xoHere, foreign: existsSync(venv) && !xoVenv, pin, onPath,
+      behind: xoHere && !onPath ? [NOT_ON_PATH] : [], note },
+  };
+}
+
 /** @param {string | null} out  `python --version` output @param {number[]} [min] */
 export function pythonOk(out, min = [3, 11, 4]) {
   const m = /(\d+)\.(\d+)\.(\d+)/.exec(out ?? "");
@@ -225,20 +286,23 @@ export function pythonOk(out, min = [3, 11, 4]) {
 
 /**
  * The Python to make qq's and xo's venvs with: QQ_PYTHON when set, else python3, else the newest
- * python3.N on PATH. `persist` says qq needs QQ_PYTHON in the startup file to find it later.
- * @param {NodeJS.ProcessEnv} env @param {number[]} min @param {Read} [run] @returns {Promise<PythonPick>}
+ * python3.N on PATH (on Windows: python, else the py launcher). `persist` says qq needs QQ_PYTHON in the
+ * startup file to find it later.
+ * @param {NodeJS.ProcessEnv} env @param {number[]} min @param {Read} [run] @param {string} [platform]
+ * @returns {Promise<PythonPick>}
  */
-export async function pickPython(env, min, run = read) {
+export async function pickPython(env, min, run = read, platform = process.platform) {
   if (env.QQ_PYTHON) {
     const version = (await run(env.QQ_PYTHON, ["--version"], env))?.trim() || null;
     return { cmd: env.QQ_PYTHON, version, ok: pythonOk(version, min), persist: false };
   }
   /** @type {string | null} */
   let first = null;
-  for (const cmd of ["python3", "python3.14", "python3.13", "python3.12", "python3.11"]) {
+  const names = platform === "win32" ? ["python", "py"] : ["python3", "python3.14", "python3.13", "python3.12", "python3.11"];
+  for (const cmd of names) {
     const version = (await run(cmd, ["--version"], env))?.trim() || null;
-    if (cmd === "python3") first = version;
-    if (pythonOk(version, min)) return { cmd, version, ok: true, persist: cmd !== "python3" };
+    if (cmd === names[0]) first = version;
+    if (pythonOk(version, min)) return { cmd, version, ok: true, persist: platform !== "win32" && cmd !== "python3" };
   }
   return { cmd: null, version: first, ok: false, persist: false };
 }
@@ -251,11 +315,20 @@ export async function pickPython(env, min, run = read) {
 export const PYTHON_HELP = "https://docs.astral.sh/uv/getting-started/installation/";
 export const PYTHON_CMD = "uv python install 3.13";
 
+/** Windows' Python: python.org's installer, which can put python.exe on PATH. */
+export const PYTHON_WIN = "https://www.python.org/downloads/windows/";
+
 /**
  * What to do about a Python that is too old, after the version found.
  * @param {PythonPick} python  cmd is set only when QQ_PYTHON named it
+ * @param {string} [platform]
  */
-export function pythonHelp(python) {
+export function pythonHelp(python, platform = "linux") {
+  if (platform === "win32") {
+    return `Install Python 3.13 from python.org ( ${PYTHON_WIN} ), ticking "Add python.exe to PATH" in its installer, ` +
+      "open a new terminal, then run qq-setup's command again. " +
+      (python.cmd ? `QQ_PYTHON is set to ${python.cmd}: point it at the new python.exe.` : "qq-setup then finds python by itself.");
+  }
   return `Install Python 3.13 with uv, which needs no sudo: install uv ( ${PYTHON_HELP} ), open a new terminal, run  ${PYTHON_CMD}  then run qq-setup's command again. ` +
     (python.cmd ? `QQ_PYTHON is set to ${python.cmd}: point it at python3.13.` : "qq-setup then finds python3.13 by itself.");
 }
@@ -289,6 +362,7 @@ export function pythonFloor(a) {
  * @returns {{ steps: Step[], stop: string | null }}  stop: why nothing can run
  */
 export function planSteps(actions, state, { python, platform, git, demo = [], pythonLine = false }) {
+  if (platform === "win32") return planWindows(actions, state, { python, git });
   /** @type {Step[]} */
   const steps = [];
   const qq = usesQq(actions);
@@ -327,6 +401,27 @@ export function planSteps(actions, state, { python, platform, git, demo = [], py
   return { steps, stop: null };
 }
 
+/**
+ * The steps on Windows, in cmd.exe: xo only, since qq does not run there.
+ * @param {{ qq: Action, xo: Action }} actions @param {State} state
+ * @param {{ python: PythonPick, git: boolean }} ctx @returns {{ steps: Step[], stop: string | null }}
+ */
+function planWindows(actions, state, { python, git }) {
+  /** @type {Step[]} */
+  const steps = [];
+  if (actions.qq !== "keep") return { steps, stop: "qq runs on Linux and macOS, so qq-setup cannot install, update or remove it on Windows" };
+  const xo = freshXo(actions, state);
+  if (xo && !git) return { steps, stop: "git is needed to install xo and is not installed (on Windows: https://git-scm.com/downloads/win )" };
+  if (xo && !python.ok) {
+    return { steps, stop: `xo needs Python 3.11 or newer (found ${python.version ?? "none"}). ${pythonHelp(python, "win32")}` };
+  }
+  if (xo) steps.push(XO_WIN.install);
+  else if (actions.xo === "update") steps.push(XO_WIN.update);
+  if (((xo || actions.xo === "update") && !state.xo.onPath) || actions.xo === "path") steps.push(XO_WIN.path);
+  if (actions.xo === "remove") steps.push(...XO_WIN.remove);
+  return { steps, stop: null };
+}
+
 /** The tool's only problem is its missing PATH line. @param {{ behind: string[] }} t */
 export const pathOnly = (t) => t.behind.length === 1 && t.behind[0] === NOT_ON_PATH;
 
@@ -338,7 +433,7 @@ export const pathOnly = (t) => t.behind.length === 1 && t.behind[0] === NOT_ON_P
  */
 export function choices(t) {
   /** @type {Action[]} */
-  const all = "foreign" in t && t.foreign ? []
+  const all = ("foreign" in t && t.foreign) || ("unsupported" in t && t.unsupported) ? []
     : t.broken ? ["install", "remove", "keep"]
       : !t.installed ? ["install", "keep"]
         : pathOnly(t) ? ["path", "update", "remove", "keep"]
@@ -356,7 +451,7 @@ export function choices(t) {
  */
 export async function prepare(actions, state, { demo, pythonLine = false, env, platform, run }) {
   const needs = usesQq(actions) || freshXo(actions, state);
-  const python = needs ? await pickPython(env, pythonFloor(actions), run) : { cmd: null, version: null, ok: true, persist: false };
+  const python = needs ? await pickPython(env, pythonFloor(actions), run, platform) : { cmd: null, version: null, ok: true, persist: false };
   const git = !needs || (await run("git", ["--version"], env)) !== null;
   const { steps, stop } = planSteps(actions, state, { python, platform, git, demo, pythonLine });
   const py = python.ok ? python.cmd : platform === "darwin" ? "python3.13" : null;
@@ -382,7 +477,8 @@ export function afterNotes(actions, home) {
 
 /** One line per tool for the terminal. @param {State} s @returns {string[]} */
 export function describe(s) {
-  const qq = s.qq.broken ? "not working: ~/qq-tools/depot is there without bin/qq"
+  const qq = s.qq.unsupported ? "not on Windows: qq runs on Linux and macOS"
+    : s.qq.broken ? "not working: ~/qq-tools/depot is there without bin/qq"
     : !s.qq.installed ? "not installed"
       : `installed at ${s.qq.commit?.slice(0, 7) ?? "an unknown commit"}` +
         (s.qq.localWork ? `, with local work (${s.qq.localWork})`
@@ -402,12 +498,12 @@ export function describe(s) {
  * is installed, one that is only missing its PATH line gets just that line, and one that is behind is
  * updated (also with --update, which reruns an up-to-date one). A qq checkout with local work is kept:
  * updating or removing it would delete that work. A ~/.xo that is not xo's is never touched.
- * @param {{ installed: boolean, broken: boolean, behind: string[], localWork?: string | null, foreign?: boolean }} t
+ * @param {{ installed: boolean, broken: boolean, behind: string[], localWork?: string | null, foreign?: boolean, unsupported?: boolean }} t
  * @param {{ remove?: boolean, update?: boolean }} flags
  * @returns {Action}
  */
 export function defaultAction(t, flags) {
-  if (t.foreign) return "keep";
+  if (t.foreign || t.unsupported) return "keep";
   // Adding the PATH line touches no checkout, so it is the default even with local work.
   if (!flags.remove && !flags.update && t.installed && pathOnly(t)) return "path";
   if (t.localWork) return "keep";
@@ -416,10 +512,19 @@ export function defaultAction(t, flags) {
   return t.behind.length || flags.update ? "update" : "keep";
 }
 
-/** Run one step in sh, showing its output; resolves to its exit code. @param {string} cmd @param {NodeJS.ProcessEnv} env */
+/**
+ * How one step runs: in sh, or in cmd.exe on Windows (Node's shell there: %ComSpec% /d /s /c).
+ * @param {string} cmd @param {string} [platform] @returns {[string, string[], { shell?: boolean }]}
+ */
+export function stepCommand(cmd, platform = process.platform) {
+  return platform === "win32" ? [cmd, [], { shell: true }] : ["/bin/sh", ["-c", cmd], {}];
+}
+
+/** Run one step in sh (cmd.exe on Windows), showing its output; resolves to its exit code. @param {string} cmd @param {NodeJS.ProcessEnv} env */
 export function runStep(cmd, env) {
   return new Promise((ok) => {
-    const child = spawn("/bin/sh", ["-c", cmd], { stdio: "inherit", env });
+    const [file, args, opts] = stepCommand(cmd);
+    const child = spawn(file, args, { ...opts, stdio: "inherit", env });
     child.on("error", () => ok(127));
     child.on("exit", (code, signal) => ok(code ?? (signal ? 128 : 1)));
   });
@@ -430,7 +535,8 @@ const USAGE = `qq-setup install: install, update or remove qq (with qqsync) and 
   npx --allow-remote=root https://codeload.github.com/quirq-ai/setup/tar.gz/<commit> install [--only qq|xo] [--update | --remove] [--yes] [--dry-run]
 
 It shows what is installed, asks what to do with each tool (install what is missing; update, remove or
-keep what is there), prints the exact commands, and runs them after you say yes.
+keep what is there), prints the exact commands, and runs them after you say yes. On Windows it handles
+xo only, in %USERPROFILE%\\.xo with cmd.exe commands; qq runs on Linux and macOS.
 
   --only qq|xo   only this tool (qq includes qqsync); default both
   --update       update what is installed (rerun its install), install what is missing
@@ -492,13 +598,22 @@ export async function main(argv, io = realIo()) {
     else return err(`qq-setup install: unknown option ${a}${a === "--only" ? " (use --only qq or --only xo)" : ""}\n\n${USAGE}`), 2;
   }
   if (f.update && f.remove) return err("qq-setup install: --update and --remove do not go together"), 2;
-  if (io.platform === "win32") return err(`qq-setup install: qq and xo install on Linux and macOS only. ${windowsNote(io.env, process.cwd())}`), 1;
+  const windows = io.platform === "win32";
+  if (windows) {
+    if (f.only.length === 1 && f.only[0] === "qq") return err(`qq-setup install: ${windowsNote(io.env, process.cwd())}`), 1;
+    // qq does not run on Windows: only xo is looked at and asked about.
+    f.only = ["xo"];
+  }
 
-  const home = io.env.HOME;
-  // Every step names ~: a relative HOME would aim rm -rf at the current folder.
-  if (!home || !isAbsolute(home)) return err("qq-setup install: HOME must be set to an absolute path"), 2;
+  // Every step names the home folder (~, or %USERPROFILE% on Windows): a relative one would aim the
+  // deletes at the current folder.
+  const home = windows ? io.env.USERPROFILE : io.env.HOME;
+  if (!home || !(windows ? win32.isAbsolute(home) : isAbsolute(home))) {
+    return err(`qq-setup install: ${windows ? "USERPROFILE" : "HOME"} must be set to an absolute path`), 2;
+  }
   out("Looking at what is installed...");
-  const state = await detect({ home, latest: io.latest, run: io.run });
+  const state = await detect({ home, latest: io.latest, run: io.run, platform: io.platform });
+  if (windows) out(`  qq: ${windowsNote(io.env, process.cwd())}`);
   for (const line of describe(state)) out(line);
   const interactive = !f.yes && !f.dryRun && io.tty;
   if (!interactive && !f.yes && !f.dryRun) {

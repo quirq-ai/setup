@@ -40,7 +40,8 @@ export type Machine = {
   // The signature of this look: a plan is made only while the machine still matches it.
   seen: string;
   demo: string[];
-  qq: MachineTool & { localWork: string | null; pythonLine: { line: string; files: string[] } | null };
+  // note: on Windows, why qq is not offered (cli/windows.mjs).
+  qq: MachineTool & { localWork: string | null; pythonLine: { line: string; files: string[] } | null; note: string | null };
   xo: MachineTool & { foreign: boolean; note: string | null };
 };
 export type Choice = { qq: Action; xo: Action; demo: string[]; python: boolean };

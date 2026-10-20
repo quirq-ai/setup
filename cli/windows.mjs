@@ -1,5 +1,6 @@
 // @ts-check
-// What qq-setup says on Windows, where its install steps (sh commands for Linux and macOS) cannot run.
+// What qq-setup says about qq on Windows: qq runs on Linux and macOS only, so on Windows qq-setup installs
+// xo (in cmd.exe) but not qq, and points to WSL for qq.
 // A common trap: in WSL with no Linux Node, the shell finds Windows' npx, because WSL adds Windows' PATH
 // by default, so qq-setup runs on Windows' Node. npx then starts in \\wsl.localhost\<distro>\... (or
 // \\wsl$\... on older WSL), or in C:\... when started under /mnt/c.
@@ -20,17 +21,17 @@ const CHECK = "check that the command  which npx  prints a path that does not st
   "(if it prints nothing, Node is not installed inside WSL yet)";
 
 /**
- * The one explanation, for the page, `install` and the terminal note.
+ * Why qq is not offered on Windows, for the page, `install` and the terminal note.
  * @param {Record<string, string | undefined>} env  INIT_CWD: the folder npx started in
  * @param {string} cwd  qq-setup's own folder
  */
 export function windowsNote(env, cwd) {
   return fromWsl(env.INIT_CWD) || fromWsl(cwd)
-    ? "This is a WSL terminal, but it ran Windows' Node, which WSL found on Windows' PATH. qq-setup's install steps " +
-        "are shell commands for Linux and macOS, so they cannot run on Windows' Node. Install Node 22 or newer inside WSL, " +
+    ? "This is a WSL terminal, but it ran Windows' Node, which WSL found on Windows' PATH, so qq-setup works here as on " +
+        "Windows: it can install xo for Windows, not qq. For qq in WSL, install Node 22 or newer inside WSL, " +
         `open a new WSL terminal, ${CHECK}, then run qq-setup's command again. qq-setup is not tested in WSL.`
-    : "qq-setup's install steps are shell commands for Linux and macOS, and qq runs on Linux and macOS. " +
-        "To try them on this PC, use WSL, which gives Windows a Linux terminal: install Node 22 or newer inside WSL, " +
+    : "qq runs on Linux and macOS, so qq-setup cannot install it on Windows; xo installs here. " +
+        "For qq on this PC, use WSL, which gives Windows a Linux terminal: install Node 22 or newer inside WSL, " +
         "then run the same command there. qq-setup is not tested in WSL. If you already ran it in WSL, it ran Windows' Node: " +
         `install Node 22 or newer inside WSL, open a new WSL terminal, ${CHECK}, then run qq-setup's command again.`;
 }

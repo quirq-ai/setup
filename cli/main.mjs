@@ -7,7 +7,7 @@
 // machine, in your home directory (and, on a Mac with no new enough Python, Homebrew's folder).
 
 import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { listOrgs, listRepos } from "./facts.mjs";
 import { getJson, GhError, isName } from "./gh.mjs";
@@ -17,7 +17,6 @@ import { protectionWarnings, readProtection } from "./protection.mjs";
 import { openerBase, openFile, writeOpener } from "./opener.mjs";
 import { machine } from "./machine.mjs";
 import { startServer } from "./server.mjs";
-import { windowsNote } from "./windows.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
@@ -124,15 +123,13 @@ async function main(argv = process.argv.slice(2)) {
   // Set once a page has traded the key, so a slow auto-open never launches a browser on a dead link.
   let traded = false;
   let refused = 0;
-  const home = process.env.HOME ?? "";
   const windows = process.platform === "win32";
-  // The machine steps are sh commands that act on ~: on Windows, or with no absolute HOME, the panel
-  // offers nothing (cli/install.mjs refuses both too).
-  const here = !windows && home.startsWith("/") ? machine({ home, env: process.env, platform: process.platform,
+  // The machine steps act on the home folder: ~ in sh, or %USERPROFILE% in cmd.exe on Windows. With no
+  // absolute one the panel offers nothing (cli/install.mjs refuses it too).
+  const home = (windows ? process.env.USERPROFILE : process.env.HOME) ?? "";
+  const here = (windows ? win32.isAbsolute(home) : home.startsWith("/")) ? machine({ home, env: process.env, platform: process.platform,
     echo: (t) => process.stdout.write(t) }) : null;
-  const noHome = windows
-    ? { error: windowsNote(process.env, process.cwd()), unsupported: true }
-    : { error: "HOME must be set to an absolute path for qq-setup to install anything" };
+  const noHome = { error: `${windows ? "USERPROFILE" : "HOME"} must be set to an absolute path for qq-setup to install anything` };
   const form = await startServer({
     root: join(ROOT, "out"),
     port,

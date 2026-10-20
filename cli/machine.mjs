@@ -11,7 +11,8 @@ import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { afterNotes, choices, DEMO, describe, detect, prepare, read, XO_PIN } from "./install.mjs";
+import { windowsNote } from "./windows.mjs";
+import { afterNotes, choices, DEMO, describe, detect, prepare, read, stepCommand, XO_PIN } from "./install.mjs";
 
 /** @typedef {import("./install.mjs").Action} Action */
 /** @typedef {import("./install.mjs").State} State */
@@ -45,7 +46,7 @@ export function machine({ home, env, platform, run = read, runStep: step = piped
   let planSeq = 0;
   const busy = () => starting || (!!current && !current.done);
 
-  const look = () => detect({ home, latest, run });
+  const look = () => detect({ home, latest, run, platform });
   const demoHere = () => DEMO.filter((d) => existsSync(join(home, d)));
   // What the page was shown: a run starts only while the machine still looks the same (local work included).
   const seen = (/** @type {State} */ s) => JSON.stringify([describe(s), s.qq.localWork, s.qq.pythonLine, demoHere()]);
@@ -66,7 +67,7 @@ export function machine({ home, env, platform, run = read, runStep: step = piped
         seen: seen(s),
         demo: demoHere(),
         qq: { line: qqLine, choices: choices(s.qq), installed: s.qq.installed, broken: s.qq.broken, localWork: s.qq.localWork,
-          pythonLine: s.qq.pythonLine },
+          pythonLine: s.qq.pythonLine, note: s.qq.unsupported ? windowsNote(env, process.cwd()) : null },
         xo: { line: xoLine, choices: choices(s.xo), installed: s.xo.installed, broken: s.xo.broken, foreign: s.xo.foreign, note: s.xo.note },
       };
     },
@@ -223,13 +224,14 @@ function planNotes(c) {
 }
 
 /**
- * Run one step in sh with no input, its output piped to onOutput; resolves to its exit code.
+ * Run one step in sh (cmd.exe on Windows) with no input, its output piped to onOutput; resolves to its exit code.
  * @param {string} cmd @param {NodeJS.ProcessEnv} env @param {(s: string) => void} onOutput
  * @returns {Promise<number>}
  */
 export function pipedStep(cmd, env, onOutput) {
   return new Promise((ok) => {
-    const child = spawn("/bin/sh", ["-c", cmd], { stdio: ["ignore", "pipe", "pipe"], env });
+    const [file, args, opts] = stepCommand(cmd);
+    const child = spawn(file, args, { ...opts, stdio: ["ignore", "pipe", "pipe"], env });
     child.stdout.on("data", (c) => onOutput(String(c)));
     child.stderr.on("data", (c) => onOutput(String(c)));
     child.on("error", () => ok(127));

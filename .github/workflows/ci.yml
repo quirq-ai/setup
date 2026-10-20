@@ -155,3 +155,59 @@ jobs:
           code=0; out=$(node cli/bin.mjs --version 2>&1) || code=$?
           want="qq-setup needs Node 22 or newer, and this is Node $(node -p process.versions.node)."
           [ "$code" = 1 ] && [ "$(printf '%s\n' "$out" | head -1)" = "$want" ] || { printf '%s\n' "$out"; echo "::error::exit $code"; exit 1; }
+
+  # xo on native Windows, from cmd, for real: the steps qq-setup's install plans there (a venv in
+  # %USERPROFILE%\.xo, its Scripts folder on the user PATH), then remove. The runner has python and git.
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      # A user PATH entry stored with a %VAR% in it must stay that way after the install and the remove.
+      - name: Seed the user PATH
+        shell: pwsh
+        run: |
+          $k = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
+          $old = [string]$k.GetValue('Path', '', 'DoNotExpandEnvironmentNames')
+          $k.SetValue('Path', (@($old -split ';' | Where-Object { $_ }) + '%USERPROFILE%\qq-ci-keep') -join ';', 'ExpandString')
+
+      - name: Install xo
+        shell: cmd
+        run: node cli/bin.mjs install --only xo --yes
+
+      - name: xo runs and is on the user PATH
+        shell: pwsh
+        run: |
+          & "$env:USERPROFILE\.xo\Scripts\xo.exe" --version
+          if ($LASTEXITCODE -ne 0) { throw "xo.exe did not run" }
+          $p = [string][Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment').GetValue('Path', '', 'DoNotExpandEnvironmentNames')
+          Write-Output $p
+          $d = Join-Path $env:USERPROFILE '.xo\Scripts'
+          if (@($p -split ';') -notcontains $d) { throw "the user PATH lacks $d" }
+          if (@($p -split ';') -notcontains '%USERPROFILE%\qq-ci-keep') { throw "the user PATH lost an unexpanded entry" }
+
+      - name: A second install finds xo and changes nothing
+        shell: cmd
+        run: node cli/bin.mjs install --only xo --yes
+
+      - name: Remove xo
+        shell: cmd
+        run: node cli/bin.mjs install --only xo --remove --yes
+
+      - name: xo and its PATH entry are gone
+        shell: pwsh
+        run: |
+          if (Test-Path "$env:USERPROFILE\.xo") { throw "$env:USERPROFILE\.xo is still there" }
+          $p = [string][Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment').GetValue('Path', '', 'DoNotExpandEnvironmentNames')
+          Write-Output $p
+          if ($p -match '\\\.xo\\Scripts') { throw "the user PATH still has xo" }
+          if (@($p -split ';') -notcontains '%USERPROFILE%\qq-ci-keep') { throw "the user PATH lost an unexpanded entry" }

@@ -50,7 +50,7 @@ export function checks(seen) {
       (pyOk ? "" : "; qq and the setup step need Python 3.11.4 or newer" +
         (seen.newer ? `. qq-setup found ${seen.newer}: installing or updating qq here sets QQ_PYTHON to it`
           : seen.platform === "darwin" ? `. macOS's python3 is 3.9: run  ${MAC_PYTHON.cmd}  then open a new terminal`
-            : `. ${pythonHelp({ cmd: seen.env.QQ_PYTHON || null, version: seen.python, ok: false, persist: false })}`)) });
+            : `. ${pythonHelp({ cmd: seen.env.QQ_PYTHON || null, version: seen.python, ok: false, persist: false }, seen.platform)}`)) });
 
   if (seen.gh && !setVars.length) {
     out.push({ name: "gh login", ok: !!seen.login, fatal: true,
@@ -79,7 +79,7 @@ export function checks(seen) {
     out.push({ name: "macOS", ok: true, fatal: false,
       detail: `setup works here. ${MAC}` });
   } else if (seen.platform === "win32") {
-    out.push({ name: "Windows", ok: false, fatal: false, detail: `qq-setup installs qq and xo on Linux and macOS only. ${windowsNote(seen.env, seen.cwd ?? "")}` });
+    out.push({ name: "Windows", ok: false, fatal: false, detail: windowsNote(seen.env, seen.cwd ?? "") });
   }
   return out;
 }
@@ -96,7 +96,8 @@ function version(cmd, args) {
 
 /** Observe the machine and the login, then check. @returns {Promise<Check[]>} */
 export async function preflight() {
-  const pythonCmd = qqPython(process.env);
+  // On Windows, python (xo's venv is made with it there; qq does not run on Windows).
+  const pythonCmd = process.platform === "win32" ? process.env.QQ_PYTHON || "python" : qqPython(process.env);
   const [git, ghv, python] = await Promise.all([
     version("git", ["--version"]),
     version("gh", ["--version"]),
