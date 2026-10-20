@@ -278,7 +278,9 @@ export async function detect({ home, latest, run = read, platform = process.plat
 async function detectWindows(home, run) {
   const venv = join(home, ".xo");
   const xoBin = join(venv, "Scripts", "xo.exe");
-  const xoVenv = existsSync(join(venv, "pyvenv.cfg"));
+  // A venv, or what a remove left of one: rmdir deletes pyvenv.cfg but not an xo.exe in use (xo serve),
+  // and the retry must still offer remove.
+  const xoVenv = existsSync(join(venv, "pyvenv.cfg")) || existsSync(xoBin);
   const xoRuns = async () => (await run(xoBin, ["--version"])) !== null || (await run(xoBin, ["--version"])) !== null;
   const xoHere = xoVenv && existsSync(xoBin) && (await xoRuns());
   const pin = xoHere ? pinIn(await run(join(venv, "Scripts", "pip.exe"), ["freeze", "--disable-pip-version-check"]), "quirq-xo") : null;
@@ -561,14 +563,15 @@ export function defaultAction(t, flags) {
 }
 
 /**
- * How one step runs: in sh, or in cmd.exe on Windows, as Node's shell: true runs it (%ComSpec% /d /s /c "…")
- * plus /v:off, so a DelayedExpansion registry setting cannot eat a ! in a folder name.
+ * How one step runs: in sh, or in cmd.exe on Windows, as Node's shell: true runs it (cmd /d /s /c "…")
+ * plus /v:off, so a DelayedExpansion registry setting cannot eat a ! in a folder name. Always System32's
+ * cmd.exe, whatever ComSpec names: the steps are cmd.exe syntax.
  * @param {string} cmd @param {string} [platform] @param {NodeJS.ProcessEnv} [env]
  * @returns {[string, string[], { windowsVerbatimArguments?: boolean }]}
  */
 export function stepCommand(cmd, platform = process.platform, env = process.env) {
   return platform === "win32"
-    ? [env.ComSpec || systemExe("cmd.exe", env), ["/d", "/v:off", "/s", "/c", `"${cmd}"`], { windowsVerbatimArguments: true }]
+    ? [systemExe("cmd.exe", env), ["/d", "/v:off", "/s", "/c", `"${cmd}"`], { windowsVerbatimArguments: true }]
     : ["/bin/sh", ["-c", cmd], {}];
 }
 

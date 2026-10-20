@@ -12,7 +12,7 @@ import { test } from "node:test";
 import { detectKinds } from "../cli/detect.mjs";
 import { encodeRef, ghEnv, GhError, isName } from "../cli/gh.mjs";
 import { buildPlan, checkAnswers } from "../cli/plan.mjs";
-import { checks } from "../cli/preflight.mjs";
+import { checks, pythonAt } from "../cli/preflight.mjs";
 import { listRepos } from "../cli/facts.mjs";
 import { classicFromError, protectionWarnings } from "../cli/protection.mjs";
 import { installFor, MAC, MAC_PYTHON } from "../cli/tools.mjs";
@@ -176,6 +176,14 @@ test("preflight checks: token variables, scopes, Python and macOS", () => {
     "not found (python); xo needs Python 3.11 or newer. qq-setup found py (Python 3.13.1): installing xo here uses it");
   assert.match(winLine({ python: "Python 3.10.11" })?.detail ?? "", /; xo needs Python 3\.11 or newer\. Install Python 3\.13 from python\.org /);
   assert.equal(checks({ ...base, platform: "win32" }).some((c) => c.name === "Python 3.11.4+" || /QQ_PYTHON to it/.test(c.detail)), false);
+  // The Python preflight runs on Windows: by full path from PATH's folders, never a bare name.
+  const pyBin = mkdtempSync(join(tmpdir(), "qq-setup-pf-win-"));
+  writeFileSync(join(pyBin, "python.exe"), "");
+  assert.equal(pythonAt("python", { PATH: pyBin }), join(pyBin, "python.exe"));
+  assert.equal(pythonAt("python.exe", { PATH: pyBin }), join(pyBin, "python.exe"));
+  assert.equal(pythonAt("py", { PATH: pyBin }), null);
+  assert.equal(pythonAt("C:\\Py\\python.exe", { PATH: pyBin }), "C:\\Py\\python.exe");
+  rmSync(pyBin, { recursive: true, force: true });
   assert.match(mac.find((c) => c.name === "macOS")?.detail ?? "", /Linux x86_64 only.*no pin for platform.*clone with git.*--toolchain NAME=ROOT/);
 
   assert.equal(checks({ ...base, node: "v20.11.0" })[0].ok, false);

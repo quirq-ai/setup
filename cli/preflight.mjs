@@ -96,6 +96,15 @@ function version(cmd, args) {
   });
 }
 
+/**
+ * On Windows, the Python preflight runs: a name with a folder as given, else by full path from PATH's
+ * folders (never the current folder's python.exe), or null when PATH has none.
+ * @param {string} cmd @param {NodeJS.ProcessEnv} env @param {typeof findExe} [find]
+ */
+export function pythonAt(cmd, env, find = findExe) {
+  return /[\\/]/.test(cmd) ? cmd : find(cmd.replace(/\.exe$/i, ""), env);
+}
+
 /** Observe the machine and the login, then check. @returns {Promise<Check[]>} */
 export async function preflight() {
   // On Windows, python (xo's venv is made with it there; qq does not run on Windows).
@@ -103,8 +112,7 @@ export async function preflight() {
   const [git, ghv, python] = await Promise.all([
     version("git", ["--version"]),
     version("gh", ["--version"]),
-    // On Windows by full path from PATH's folders, never the current folder's python.exe.
-    process.platform === "win32" ? (async () => { const at = /[\\/]/.test(pythonCmd) ? pythonCmd : findExe(pythonCmd.replace(/\.exe$/i, ""), process.env);
+    process.platform === "win32" ? (async () => { const at = pythonAt(pythonCmd, process.env);
       return at ? version(at, ["--version"]) : null; })() : version(pythonCmd, ["--version"]),
   ]);
   let login = null, scopes = null, loginError = null;

@@ -270,28 +270,40 @@ jobs:
             $cp.DeleteValue('DelayedExpansion')
           }
 
-      # A file in use (here pyvenv.cfg, held open) is left by rmdir, which may still exit 0: the remove must
-      # fail there, not go on to "Done", and work once the file is free.
-      - name: Removing xo with a file in use fails, then works once it is free
+      # A running xo (xo serve) holds Scripts\xo.exe: rmdir deletes the rest, pyvenv.cfg too, and may still
+      # exit 0. The remove must fail there, with the PATH entry still on and no "Done"; once xo.exe is free,
+      # the retry must still see xo's folder (not a foreign one), delete it and take the PATH entry off.
+      - name: Removing xo while xo.exe is in use fails, then the retry finishes it
         shell: pwsh
         run: |
           $home2 = Join-Path $env:RUNNER_TEMP 'qq ci locked'
           New-Item -ItemType Directory -Force -Path (Join-Path $home2 '.xo\Scripts') | Out-Null
           Set-Content -LiteralPath (Join-Path $home2 '.xo\pyvenv.cfg') -Value 'home = C:\nowhere'
+          Set-Content -LiteralPath (Join-Path $home2 '.xo\Scripts\xo.exe') -Value 'not a program'
           $env:USERPROFILE = $home2
-          $held = [System.IO.File]::Open((Join-Path $home2 '.xo\pyvenv.cfg'), 'Open', 'Read', 'None')
+          $d = Join-Path $home2 '.xo\Scripts'
+          $k = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
+          $before = [string]$k.GetValue('Path', '', 'DoNotExpandEnvironmentNames')
+          $k.SetValue('Path', (@($before -split ';' | Where-Object { $_ }) + $d) -join ';', 'ExpandString')
+          $onPath = { @(([string]$k.GetValue('Path', '', 'DoNotExpandEnvironmentNames')) -split ';') -contains $d }
+          $held = [System.IO.File]::Open((Join-Path $d 'xo.exe'), 'Open', 'Read', 'None')
           try {
             $out = node cli/bin.mjs install --only xo --remove --yes | Out-String
             Write-Output $out
-            if ($LASTEXITCODE -eq 0) { throw "remove exited 0 with a file in use" }
+            if ($LASTEXITCODE -eq 0) { throw "remove exited 0 with xo.exe in use" }
             if ($out -notmatch "xo's folder is still there") { throw "remove did not say why it stopped" }
             if ($out -match 'Done\.') { throw "remove said Done" }
+            if (Test-Path -LiteralPath (Join-Path $home2 '.xo\pyvenv.cfg')) { throw "this test needs rmdir to have deleted pyvenv.cfg" }
+            if (-not (& $onPath)) { throw "the PATH entry went before the folder did" }
           } finally {
             $held.Close()
           }
-          node cli/bin.mjs install --only xo --remove --yes
-          if ($LASTEXITCODE -ne 0) { throw "remove exited $LASTEXITCODE once the file was free" }
+          $out = node cli/bin.mjs install --only xo --remove --yes | Out-String
+          Write-Output $out
+          if ($LASTEXITCODE -ne 0) { throw "the retry exited $LASTEXITCODE" }
+          if ($out -match 'not an xo install') { throw "the retry called xo's folder foreign" }
           if (Test-Path -LiteralPath (Join-Path $home2 '.xo')) { throw "$home2\.xo is still there" }
+          if (& $onPath) { throw "the retry left the PATH entry" }
 
       # Windows looks in the current folder before PATH. Programs planted there under the names qq-setup
       # uses (python, py, powershell, reg, cmd) must never run: it names them by full path.

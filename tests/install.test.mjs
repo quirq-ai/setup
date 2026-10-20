@@ -315,6 +315,11 @@ test("windows: detect offers nothing for qq and finds xo's venv and its user PAT
   assert.deepEqual(off.xo.behind, ["not on PATH"]);
   // A venv whose xo.exe does not run is broken: Reinstall rebuilds it.
   assert.equal((await detect({ home, run: winRun({ xo: false }), platform: "win32" })).xo.broken, true);
+  // What a remove leaves when xo.exe is in use (rmdir took pyvenv.cfg): still xo's, so remove is offered again.
+  rmSync(join(home, ".xo", "pyvenv.cfg"));
+  const left = await detect({ home, run: winRun({ xo: false }), platform: "win32" });
+  assert.deepEqual({ broken: left.xo.broken, foreign: left.xo.foreign }, { broken: true, foreign: false });
+  assert.ok(choices(left.xo).includes("remove"));
 });
 
 test("windows: the steps are cmd.exe commands for xo only, with Windows' Python and git", () => {
@@ -355,8 +360,9 @@ test("windows: the steps are cmd.exe commands for xo only, with Windows' Python 
   assert.match(old, /^xo needs Python 3\.11 or newer \(found Python 3\.10\.11\)\. Install Python 3\.13 from python\.org \( https:\/\/www\.python\.org\/downloads\/windows\/ \), ticking "Add python\.exe to PATH"/);
   assert.match(old, /qq-setup then finds python by itself\.$/);
   // Steps run in cmd.exe there, as Node's shell does it, plus /v:off; cmd.exe by full path when ComSpec is unset.
-  assert.deepEqual(stepCommand("echo hi", "win32", { ComSpec: "C:\\WINDOWS\\system32\\cmd.exe" }),
-    ["C:\\WINDOWS\\system32\\cmd.exe", ["/d", "/v:off", "/s", "/c", '"echo hi"'], { windowsVerbatimArguments: true }]);
+  // Always System32's cmd.exe: the steps are cmd.exe syntax, whatever ComSpec names.
+  assert.deepEqual(stepCommand("echo hi", "win32", { ComSpec: "C:\\other\\shell.exe", SystemRoot: "C:\\WINDOWS" }),
+    ["C:\\WINDOWS\\System32\\cmd.exe", ["/d", "/v:off", "/s", "/c", '"echo hi"'], { windowsVerbatimArguments: true }]);
   assert.equal(stepCommand("echo hi", "win32", { SystemRoot: "D:\\Win" })[0], "D:\\Win\\System32\\cmd.exe");
   assert.deepEqual(stepCommand("echo hi", "linux"), ["/bin/sh", ["-c", "echo hi"], {}]);
 });
@@ -378,6 +384,10 @@ test("windows: pickPython tries python, then the py launcher, by full path, and 
   // A bare QQ_PYTHON is looked up the same way; one not in PATH's folders is not run at all.
   assert.deepEqual(await pick({ py: "Python 3.12.10" }, { QQ_PYTHON: "py.exe" }), { cmd: at.py, version: "Python 3.12.10", ok: true, persist: false });
   assert.deepEqual(await pick({ python: "Python 3.13.16" }, { QQ_PYTHON: "python3" }), { cmd: "python3", version: null, ok: false, persist: false });
+  /** @type {string[]} */
+  const ran = [];
+  await pickPython({ QQ_PYTHON: "python3" }, [3, 11, 0], async (f) => (ran.push(f), "Python 3.13.16"), "win32", find);
+  assert.deepEqual(ran, []);
 });
 
 test("windows: findExe looks in PATH's absolute folders only, never the current one", () => {
@@ -388,10 +398,12 @@ test("windows: findExe looks in PATH's absolute folders only, never the current 
   const cwd = process.cwd();
   process.chdir(bin);
   try {
-    assert.equal(findExe("python", { PATH: [".", "x"].join(delimiter) }), null);
+    assert.equal(findExe("python", { PATH: [".", "", "x"].join(delimiter) }), null);
   } finally {
     process.chdir(cwd);
   }
+  // A PATH entry in double quotes, as Windows allows.
+  assert.equal(findExe("python", { PATH: `"${bin}"` }), join(bin, "python.exe"));
   assert.equal(systemExe("reg.exe", {}), "C:\\Windows\\System32\\reg.exe");
 });
 
