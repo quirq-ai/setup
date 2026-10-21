@@ -8,7 +8,7 @@ import { test } from "node:test";
 
 import {
   BREW_PYTHON, choices, cleanTmp, DEMO, defaultAction, describe, detect, findExe, localWork, main, persistPython, pickPython, pinIn, planSteps, PYTHON_HELP, pythonOk,
-  QQ_REMOVE, QQ_REMOVE_TOOLS, QUICKSTART_XO_PIN, read, removeLineCmd, stepCommand, SYNC_PIN, systemExe, XO, XO_PATH_LINE, XO_PIN, XO_SPEC, XO_WIN,
+  QQ_REMOVE, QQ_REMOVE_TOOLS, read, removeLineCmd, stepCommand, SYNC_PIN, systemExe, XO, XO_PATH_LINE, XO_PIN, XO_SPEC, XO_WIN,
 } from "../cli/install.mjs";
 import { INSTALL, MAC_PYTHON } from "../cli/tools.mjs";
 
@@ -40,9 +40,7 @@ test("qq's remove commands are the qq guide's, at the commit install.mjs names, 
 test("xo's commands follow the xo quickstart at the commit install.mjs names", () => {
   const { cmds: [pipLine, update, logout, rm], sha } = fixture("xo-quickstart.txt");
   assert.ok(source.includes(`quickstart.md:18, at ${sha.slice(0, 7)})`), `cli/install.mjs must name xo commit ${sha.slice(0, 7)}`);
-  // The one named difference: setup's pin is newer than the quickstart's (see XO_PIN).
-  assert.ok(pipLine.includes(`@${QUICKSTART_XO_PIN}"`), "QUICKSTART_XO_PIN is the quickstart's pin");
-  assert.ok(pipLine.replace(QUICKSTART_XO_PIN, XO_PIN).includes(`"${XO_SPEC}"`), "otherwise the quickstart's spec");
+  assert.ok(pipLine.includes(`"${XO_SPEC}"`), "the pin is the quickstart's");
   assert.ok(XO.install.cmd.includes(`"${XO_SPEC}"`) && XO.install.cmd.includes("-m venv --clear ~/.xo"));
   assert.equal(XO.update.cmd, update.replace("NEW_SHA", XO_PIN));
   assert.ok(XO.remove[0].cmd.startsWith(`( ~/.xo/bin/${logout} || {`), "by path: xo may not be on PATH in this shell");
