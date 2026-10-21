@@ -106,8 +106,9 @@ deletes the venv and that entry. CI runs the install and remove for real on a Wi
   and `--yes` keeps them. It asks too before deleting an `export QQ_PYTHON=python3.N` line (something
   else may use that Python; `--yes` keeps it), and it leaves one written another way, or a `PATH`
   line written another way, and says so.
-- **xo** installs at the commit the [xo quickstart](https://github.com/quirq-ai/xo/blob/main/docs/quickstart.md)
-  pins, and updates with its `pip install --force-reinstall --no-deps` at that commit. An xo at another
+- **xo** installs at setup's pin, xo `main` at 10937c6 (newer than the 436bfbe the
+  [xo quickstart](https://github.com/quirq-ai/xo/blob/main/docs/quickstart.md) pins, for `xo connect`'s
+  auto-add), and updates with the quickstart's `pip install --force-reinstall --no-deps` at that commit. An xo at another
   commit is reported, not called out of date, since the XO team may have given you a newer one; updating
   it would move it back to the pin. When only its `PATH` line is missing, it adds just that line. Only
   a venv (with `pyvenv.cfg`) at `~/.xo` counts as xo's; any other `~/.xo` is left alone, and xo is not
