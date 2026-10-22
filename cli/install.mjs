@@ -34,8 +34,23 @@ export function cleanTmp(cmd) {
     .replace('cat "$f.qq-tmp" >| "$f" || exit 1;', 'cat "$f.qq-tmp" >| "$f" || { rm -f "$f.qq-tmp"; exit 1; };');
 }
 
+/**
+ * The audited commits setup installs, from pins.json at the package root: the one place a pin moves
+ * (in a reviewed setup PR), and the file an installed tool can read from setup's main to learn the
+ * newest audited commit. Each must be a full commit id; anything else stops setup here.
+ * @type {{ schema: string, xo: string, qqsync: string }}
+ */
+export const PINS = (() => {
+  const pins = JSON.parse(readFileSync(new URL("../pins.json", import.meta.url), "utf8"));
+  if (pins?.schema !== "qq-setup-pins/1") throw new Error(`pins.json: schema is ${JSON.stringify(pins?.schema)}, not "qq-setup-pins/1"`);
+  for (const k of ["xo", "qqsync"]) {
+    if (typeof pins[k] !== "string" || !/^[0-9a-f]{40}$/.test(pins[k])) throw new Error(`pins.json: ${k} is not a full commit id`);
+  }
+  return pins;
+})();
+
 /** The commit of xo the xo quickstart installs (quirq-ai/xo docs/quickstart.md:18, at 8cd425e). */
-export const XO_PIN = "d027963f29237c84acfc2cb52296dc625fce1d87";
+export const XO_PIN = PINS.xo;
 export const XO_SPEC = `quirq-xo @ git+https://github.com/quirq-ai/xo@${XO_PIN}`;
 export const XO_PATH_LINE = 'export PATH="$HOME/.xo/bin:$PATH"';
 /** The startup files the qq guide's PATH step can write, and its remove step reads. */
