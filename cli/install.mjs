@@ -34,8 +34,8 @@ export function cleanTmp(cmd) {
     .replace('cat "$f.qq-tmp" >| "$f" || exit 1;', 'cat "$f.qq-tmp" >| "$f" || { rm -f "$f.qq-tmp"; exit 1; };');
 }
 
-/** The commit of xo the xo quickstart installs (quirq-ai/xo docs/quickstart.md:18, at 43078fb). */
-export const XO_PIN = "80681c169e02356ce37ea6647eb25a681cdbdaac";
+/** The commit of xo the xo quickstart installs (quirq-ai/xo docs/quickstart.md:18, at 8cd425e). */
+export const XO_PIN = "d027963f29237c84acfc2cb52296dc625fce1d87";
 export const XO_SPEC = `quirq-xo @ git+https://github.com/quirq-ai/xo@${XO_PIN}`;
 export const XO_PATH_LINE = 'export PATH="$HOME/.xo/bin:$PATH"';
 /** The startup files the qq guide's PATH step can write, and its remove step reads. */
