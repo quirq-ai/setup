@@ -8,7 +8,7 @@ import { test } from "node:test";
 
 import {
   BREW_PYTHON, choices, cleanTmp, DEMO, defaultAction, describe, detect, findExe, localWork, main, persistPython, pickPython, pinIn, planSteps, PYTHON_HELP, pythonOk,
-  QQ_REMOVE, QQ_REMOVE_TOOLS, read, removeLineCmd, stepCommand, SYNC_PIN, systemExe, XO, XO_PATH_LINE, XO_PIN, XO_SPEC, XO_WIN,
+  PINS, QQ_REMOVE, QQ_REMOVE_TOOLS, read, removeLineCmd, stepCommand, SYNC_PIN, systemExe, XO, XO_PATH_LINE, XO_PIN, XO_SPEC, XO_WIN,
 } from "../cli/install.mjs";
 import { INSTALL, MAC_PYTHON } from "../cli/tools.mjs";
 
@@ -49,6 +49,19 @@ test("xo's commands follow the xo quickstart at the commit install.mjs names", (
   assert.equal(XO.remove[1].cmd, rm);
   assert.equal(SYNC_PIN, /sync@([0-9a-f]{40})/.exec(INSTALL[1].cmd)?.[1]);
   assert.equal(BREW_PYTHON.cmd, "brew install python@3.13");
+});
+
+test("pins.json holds every pin setup installs, and nothing else names another", () => {
+  const file = JSON.parse(readFileSync(new URL("../pins.json", import.meta.url), "utf8"));
+  assert.deepEqual(PINS, file);
+  assert.deepEqual(Object.keys(file).sort(), ["qqsync", "schema", "xo"]);
+  assert.equal(XO_PIN, file.xo);
+  // qqsync's commit stays inside the qq guide's command (tools.mjs, checked against the guide), so the
+  // two must agree: a pin move changes both in one PR.
+  assert.equal(SYNC_PIN, file.qqsync, "cli/tools.mjs installs qqsync at another commit than pins.json");
+  assert.doesNotMatch(source, /"[0-9a-f]{40}"/, "cli/install.mjs must not hard-code a commit: put it in pins.json");
+  const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  assert.ok(pkg.files.includes("pins.json"), "npx must get pins.json");
 });
 
 test("zsh-safe: no comment or history characters in anything install runs or the page shows", () => {

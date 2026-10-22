@@ -106,6 +106,9 @@ deletes the venv and that entry. CI runs the install and remove for real on a Wi
   and `--yes` keeps them. It asks too before deleting an `export QQ_PYTHON=python3.N` line (something
   else may use that Python; `--yes` keeps it), and it leaves one written another way, or a `PATH`
   line written another way, and says so.
+- **Pins.** The commits setup installs (xo, and qqsync for qq) live in one file,
+  [`pins.json`](pins.json) (`qq-setup-pins/1`), and move only in a reviewed setup PR. qqsync's commit is
+  also in the qq guide's command in `cli/tools.mjs`; a test keeps the two equal.
 - **xo** installs at the commit the [xo quickstart](https://github.com/quirq-ai/xo/blob/main/docs/quickstart.md)
   pins, and updates with its `pip install --force-reinstall --no-deps` at that commit. An xo at another
   commit is reported, not called out of date, since the XO team may have given you a newer one; updating
