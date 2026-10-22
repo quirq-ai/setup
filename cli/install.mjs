@@ -49,7 +49,7 @@ export const PINS = (() => {
   return pins;
 })();
 
-/** The commit of xo the xo quickstart installs (quirq-ai/xo docs/quickstart.md:18, at 8cd425e). */
+/** The commit of xo the xo quickstart installs (quirq-ai/xo docs/quickstart.md:18, at 37a14d8). */
 export const XO_PIN = PINS.xo;
 export const XO_SPEC = `quirq-xo @ git+https://github.com/quirq-ai/xo@${XO_PIN}`;
 export const XO_PATH_LINE = 'export PATH="$HOME/.xo/bin:$PATH"';
@@ -154,7 +154,10 @@ export const XO_WIN = {
 export const BREW_PYTHON = { what: "On a Mac, first install a new enough Python (macOS's python3 is 3.9)",
   cmd: /** @type {string} */ (MAC_PYTHON.cmd.split(" && ")[0]) };
 
-/** The sync commit qq's guide installs qqsync at (INSTALL[1]). */
+/**
+ * The sync commit qq's guide installs qqsync at (INSTALL[1]). setup runs this one, not PINS.qqsync:
+ * PINS.qqsync is for installed tools that read pins.json, and a test keeps the two equal.
+ */
 export const SYNC_PIN = /** @type {string} */ (/sync@([0-9a-f]{40})/.exec(INSTALL[1].cmd)?.[1]);
 
 /**

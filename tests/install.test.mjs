@@ -59,7 +59,8 @@ test("pins.json holds every pin setup installs, and nothing else names another",
   // qqsync's commit stays inside the qq guide's command (tools.mjs, checked against the guide), so the
   // two must agree: a pin move changes both in one PR.
   assert.equal(SYNC_PIN, file.qqsync, "cli/tools.mjs installs qqsync at another commit than pins.json");
-  assert.doesNotMatch(source, /"[0-9a-f]{40}"/, "cli/install.mjs must not hard-code a commit: put it in pins.json");
+  // Any full commit id, however it is quoted or written: one belongs in pins.json.
+  assert.doesNotMatch(source, /(?<![0-9a-f])[0-9a-f]{40}(?![0-9a-f])/, "cli/install.mjs must not hard-code a commit: put it in pins.json");
   const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   assert.ok(pkg.files.includes("pins.json"), "npx must get pins.json");
 });
