@@ -740,7 +740,8 @@ test("auto-update: the markers are what xo and qq read, and the option writes, k
   assert.equal(xoConfig(home, { XDG_CONFIG_HOME: xdg }, "linux"), join(xdg, "xo"));
   assert.equal(xoConfig(home, { XDG_CONFIG_HOME: "rel" }, "linux"), join(home, ".config", "xo"));
   assert.equal(xoConfig("C:\\Users\\me", { XDG_CONFIG_HOME: "D:\\cfg" }, "win32"), join("D:\\cfg", "xo"));
-  const s = await detect({ home, latest: "a".repeat(40), run: fakeRun() });
+  // env: not this process's, where a runner's XDG_CONFIG_HOME would point elsewhere.
+  const s = await detect({ home, latest: "a".repeat(40), run: fakeRun(), env: { HOME: home } });
   assert.deepEqual([s.qq.auto, s.xo.auto], [true, true]);
   assert.match(describe(s)[0], /; auto-update on: up to date/);
   sh(AUTO.qq.off.cmd);
