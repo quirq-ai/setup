@@ -38,21 +38,31 @@ export function cleanTmp(cmd) {
  * The audited commits setup installs, from pins.json at the package root: the one place a pin moves
  * (in a reviewed setup PR), and the file an installed tool can read from setup's main to learn the
  * newest audited commit. Each must be a full commit id; anything else stops setup here.
- * @type {{ schema: string, xo: string, qqsync: string }}
+ * @type {{ schema: string, xo: string, qq: string, qqsync: string }}
  */
 export const PINS = (() => {
   const pins = JSON.parse(readFileSync(new URL("../pins.json", import.meta.url), "utf8"));
   if (pins?.schema !== "qq-setup-pins/1") throw new Error(`pins.json: schema is ${JSON.stringify(pins?.schema)}, not "qq-setup-pins/1"`);
-  for (const k of ["xo", "qqsync"]) {
+  for (const k of ["xo", "qq", "qqsync"]) {
     if (typeof pins[k] !== "string" || !/^[0-9a-f]{40}$/.test(pins[k])) throw new Error(`pins.json: ${k} is not a full commit id`);
   }
   return pins;
 })();
 
-/** The commit of xo the xo quickstart installs (quirq-ai/xo docs/quickstart.md:18, at 37a14d8). */
+/** The commit of xo the xo quickstart installs (quirq-ai/xo docs/quickstart.md:18, at 0546efd). */
 export const XO_PIN = PINS.xo;
 export const XO_SPEC = `quirq-xo @ git+https://github.com/quirq-ai/xo@${XO_PIN}`;
 export const XO_PATH_LINE = 'export PATH="$HOME/.xo/bin:$PATH"';
+/** The commit of qq setup installs: the guide clones qq's newest commit, and the next step puts it here. */
+export const QQ_PIN = PINS.qq;
+/** After the guide's clone (INSTALL[0]): qq's main, moved back to the reviewed commit, as qq's own
+ * auto-update moves it (reset --keep). */
+export const QQ_AT_PIN = { what: "Put qq at setup's reviewed commit (a difference from the qq guide, which installs qq's newest commit)",
+  cmd: `( set -e; git -C ~/qq-tools/depot reset -q --keep ${QQ_PIN}; ~/qq-tools/depot/bin/qq --version )` };
+/** sh: c is the folder xo keeps its key in (xo client.py credentials_path): $XDG_CONFIG_HOME/xo when absolute, else ~/.config/xo. */
+const XO_CONF = 'case "$XDG_CONFIG_HOME" in /*) c="$XDG_CONFIG_HOME" ;; *) c="$HOME/.config" ;; esac; c="$c/xo"';
+/** The auto-update files xo keeps next to its key (xo selfupdate.py), the marker first. */
+const XO_AUTO_FILES = ["auto-update", "auto-update.json", "auto-update.log", "auto-update.lock"];
 /** The startup files the qq guide's PATH step can write, and its remove step reads. */
 const RC_FILES = [".bashrc", ".bash_profile", ".bash_login", ".profile", ".zshrc"];
 // The qq guide's PATH step's choice of startup file, so xo's line lands in the same one.
@@ -88,6 +98,8 @@ export const XO = {
     // credentials_path, services.py addresses_path) so the key never outlives the tool.
     { what: "Log xo out: deletes the saved XO key (xo asks before logging gh out too)",
       cmd: "( ~/.xo/bin/xo logout || { case \"$XDG_CONFIG_HOME\" in /*) c=\"$XDG_CONFIG_HOME\" ;; *) c=\"$HOME/.config\" ;; esac; rm -f \"$c/xo/credentials\" \"$c/xo/services\" && echo \"xo logout did not run; deleted $c/xo/credentials and $c/xo/services instead\"; } )" },
+    { what: "Delete xo's auto-update files (next to its key)",
+      cmd: `( ${XO_CONF}; rm -f ${XO_AUTO_FILES.map((f) => `"$c/${f}"`).join(" ")} )` },
     { what: "Delete xo's folder", cmd: "rm -rf ~/.xo" },
     { what: "Remove xo's PATH line", cmd: cleanTmp(removeLineCmd(XO_PATH_LINE, ".xo/bin")) },
   ],
@@ -119,6 +131,10 @@ const userPath = (body) => ps("$d = Join-Path $env:USERPROFILE '.xo\\Scripts'; "
   "$ours = @($parts | Where-Object { [Environment]::ExpandEnvironmentVariables($_).TrimEnd('\\') -eq $d }); " +
   body);
 const TELL = "[Environment]::SetEnvironmentVariable('QQ_SETUP_UNUSED', $null, 'User')";
+/** PowerShell: $c is xo's config folder, as XO_CONF (%XDG_CONFIG_HOME%\xo when absolute, as Python 3.11 and
+ * 3.12's os.path.isabs; else %USERPROFILE%\.config\xo). */
+const WIN_CONF = "$b = [string]$env:XDG_CONFIG_HOME; " +
+  "$c = if ($b -match '^([A-Za-z]:)?[\\\\/]') { Join-Path $b 'xo' } else { Join-Path $env:USERPROFILE '.config\\xo' }; ";
 
 /** xo on Windows, as cmd.exe commands: the same venv, pin and logout as XO, in Windows' folders. */
 export const XO_WIN = {
@@ -135,24 +151,25 @@ export const XO_WIN = {
     // for one leading \), else in %USERPROFILE%\.config. PowerShell reads both itself: in cmd.exe an
     // unquoted %USERPROFILE% with ) or & in it would break the line. A folder there is left, as xo leaves it.
     { what: XO.remove[0].what,
-      cmd: `"${XO_WIN_BIN}\\xo.exe" logout || ` + ps("$b = [string]$env:XDG_CONFIG_HOME; " +
-        "$c = if ($b -match '^([A-Za-z]:)?[\\\\/]') { Join-Path $b 'xo' } else { Join-Path $env:USERPROFILE '.config\\xo' }; " +
+      cmd: `"${XO_WIN_BIN}\\xo.exe" logout || ` + ps(WIN_CONF +
         "foreach ($f in 'credentials', 'services') { $p = Join-Path $c $f; if (Test-Path -LiteralPath $p -PathType Leaf) { Remove-Item -LiteralPath $p -Force } }; " +
         "Write-Output ('xo logout did not run; deleted ' + (Join-Path $c 'credentials') + ' and ' + (Join-Path $c 'services') + ' instead')") },
+    // The marker must go (a deferred update must not find it); the log and lock may be held by that
+    // update while it runs, so they are deleted when they can be.
+    { what: XO.remove[1].what,
+      cmd: ps(WIN_CONF + "$p = Join-Path $c 'auto-update'; if (Test-Path -LiteralPath $p -PathType Leaf) { Remove-Item -LiteralPath $p -Force }; " +
+        `foreach ($f in ${XO_AUTO_FILES.slice(1).map((f) => `'${f}'`).join(", ")}) { Remove-Item -LiteralPath (Join-Path $c $f) -Force -ErrorAction SilentlyContinue }; ` +
+        "Write-Output ('deleted the auto-update files in ' + $c)") },
     // rmdir can exit 0 and leave files it could not delete (one in use, as xo.exe running in another
     // terminal): then this step fails, so the PATH entry stays and "Done" is not printed. No path in the
     // ( ) block: an unquoted %USERPROFILE% with ) in it would end it.
-    { what: XO.remove[1].what,
+    { what: XO.remove[2].what,
       cmd: `rmdir /s /q "%USERPROFILE%\\.xo" & if exist "%USERPROFILE%\\.xo\\" (echo xo's folder is still there, likely a file in it is in use: close any terminal running xo, then remove xo again& exit /b 1) else (call )` },
     { what: "Take xo off your PATH (your Windows user PATH)",
       cmd: userPath(`if ($ours.Count) { $k.SetValue('Path', (@($parts | Where-Object { $ours -notcontains $_ })) -join ';', 'ExpandString'); ${TELL} }; ` +
         "Write-Output ($d + ' is not on your user PATH')") },
   ],
 };
-
-/** On a Mac with no new enough Python and only xo wanted: brew's Python without the QQ_PYTHON line. */
-export const BREW_PYTHON = { what: "On a Mac, first install a new enough Python (macOS's python3 is 3.9)",
-  cmd: /** @type {string} */ (MAC_PYTHON.cmd.split(" && ")[0]) };
 
 /**
  * The sync commit qq's guide installs qqsync at (INSTALL[1]). setup runs this one, not PINS.qqsync:
@@ -161,13 +178,45 @@ export const BREW_PYTHON = { what: "On a Mac, first install a new enough Python 
 export const SYNC_PIN = /** @type {string} */ (/sync@([0-9a-f]{40})/.exec(INSTALL[1].cmd)?.[1]);
 
 /**
+ * The auto-update option: a marker file each tool reads before a command (xo selfupdate.py, qq
+ * bootstrap.py). It names the commit setup installed, so a tool updates only while it is still there:
+ * one installed any other way is left alone. Off is no marker.
+ */
+export const AUTO = {
+  xo: {
+    on: { what: "Turn on auto-update for xo (writes the commit setup installed to auto-update, next to xo's key)",
+      cmd: `( ${XO_CONF}; mkdir -p "$c" && printf '%s\\n' ${XO_PIN} >| "$c/auto-update" && echo "auto-update is on for xo: $c/auto-update" )` },
+    off: { what: "Turn off auto-update for xo (deletes auto-update, next to xo's key)",
+      cmd: `( ${XO_CONF}; rm -f "$c/auto-update" && echo "auto-update is off for xo" )` },
+  },
+  xoWin: {
+    on: { what: "Turn on auto-update for xo (writes the commit setup installed to auto-update, next to xo's key)",
+      cmd: ps(WIN_CONF + "New-Item -ItemType Directory -Force -Path $c | Out-Null; $p = Join-Path $c 'auto-update'; " +
+        `[IO.File]::WriteAllText($p, '${XO_PIN}' + [char]10); Write-Output ('auto-update is on for xo: ' + $p)`) },
+    off: { what: "Turn off auto-update for xo (deletes auto-update, next to xo's key)",
+      cmd: ps(WIN_CONF + "$p = Join-Path $c 'auto-update'; if (Test-Path -LiteralPath $p -PathType Leaf) { Remove-Item -LiteralPath $p -Force }; " +
+        "Write-Output 'auto-update is off for xo'") },
+  },
+  qq: {
+    on: { what: "Turn on auto-update for qq (writes the commits setup installed to ~/qq-tools/auto-update)",
+      cmd: `( printf '{"qq": "%s", "qqsync": "%s"}\\n' ${QQ_PIN} ${SYNC_PIN} >| ~/qq-tools/auto-update && echo "auto-update is on for qq: ~/qq-tools/auto-update" )` },
+    off: { what: "Turn off auto-update for qq (deletes ~/qq-tools/auto-update)",
+      cmd: `( rm -f ~/qq-tools/auto-update && echo "auto-update is off for qq" )` },
+  },
+};
+
+/** On a Mac with no new enough Python and only xo wanted: brew's Python without the QQ_PYTHON line. */
+export const BREW_PYTHON = { what: "On a Mac, first install a new enough Python (macOS's python3 is 3.9)",
+  cmd: /** @type {string} */ (MAC_PYTHON.cmd.split(" && ")[0]) };
+
+/**
  * @typedef {{ installed: boolean, broken: boolean, commit: string | null, latest: string | null,
  *   syncPin: string | null, onPath: boolean, behind: string[], localWork: string | null,
- *   pythonLine: { line: string, files: string[] } | null, unsupported?: boolean }} QqState
+ *   pythonLine: { line: string, files: string[] } | null, unsupported?: boolean, auto: boolean }} QqState
  *   pythonLine: an exact `export QQ_PYTHON=python3.N` line, the form qq-setup and the qq guide write;
- *   unsupported: on Windows, where qq does not run
+ *   unsupported: on Windows, where qq does not run; auto: its auto-update marker is there (AUTO)
  * @typedef {{ installed: boolean, broken: boolean, pin: string | null, onPath: boolean, behind: string[],
- *   note: string | null, foreign: boolean }} XoState
+ *   note: string | null, foreign: boolean, auto: boolean, unsupported?: boolean }} XoState
  * @typedef {{ qq: QqState, xo: XoState }} State
  * @typedef {{ cmd: string | null, version: string | null, ok: boolean, persist: boolean }} PythonPick
  * @typedef {(file: string, args: string[], env?: NodeJS.ProcessEnv) => Promise<string | null>} Read
@@ -253,20 +302,31 @@ export async function localWork(depot, run) {
 }
 
 /**
- * Look at what is installed. Reads only: files under home, `git status`, `rev-parse`, `rev-list`,
- * `stash list` and `worktree list` in qq's checkout, `pip freeze` in the two venvs, `xo --version`
- * and, unless `latest` is given, `git ls-remote` for qq's newest commit. On Windows only xo is looked
- * at, and the user PATH (`reg query`).
- * @param {{ home: string, latest?: string | null, run?: Read, platform?: string }} o
+ * Where xo keeps its key and auto-update files, as xo client.py credentials_path: $XDG_CONFIG_HOME/xo
+ * when that is absolute, else home/.config/xo (the same rule as XO_CONF and WIN_CONF).
+ * @param {string} home @param {NodeJS.ProcessEnv} env @param {string} platform
+ */
+export function xoConfig(home, env, platform) {
+  const base = String(env.XDG_CONFIG_HOME ?? "");
+  const abs = platform === "win32" ? /^([A-Za-z]:)?[\\/]/.test(base) : base.startsWith("/");
+  return abs ? join(base, "xo") : join(home, ".config", "xo");
+}
+
+/**
+ * Look at what is installed. Reads only: files under home (and xo's config folder), `git status`,
+ * `rev-parse`, `rev-list`, `stash list` and `worktree list` in qq's checkout, `pip freeze` in the two
+ * venvs and `xo --version`. qq's commit is compared with setup's pin (`latest`, PINS.qq unless given).
+ * On Windows only xo is looked at, and the user PATH (`reg query`).
+ * @param {{ home: string, latest?: string | null, run?: Read, platform?: string, env?: NodeJS.ProcessEnv }} o
  * @returns {Promise<State>}
  */
-export async function detect({ home, latest, run = read, platform = process.platform }) {
-  if (platform === "win32") return detectWindows(home, run);
+export async function detect({ home, latest = QQ_PIN, run = read, platform = process.platform, env = process.env }) {
+  const xoAuto = existsSync(join(xoConfig(home, env, platform), "auto-update"));
+  if (platform === "win32") return detectWindows(home, run, xoAuto);
   const depot = join(home, "qq-tools", "depot");
   const qqHere = existsSync(join(depot, "bin", "qq"));
   const commit = qqHere ? (await run("git", ["-C", depot, "rev-parse", "HEAD"]))?.trim() || null : null;
   const work = existsSync(depot) ? await localWork(depot, run) : [];
-  if (qqHere && latest === undefined) latest = (await run("git", ["ls-remote", "https://github.com/quirq-ai/qq", "HEAD"]))?.split(/\s/)[0] || null;
   const syncPip = join(home, "qq-tools", "qqsync", "bin", "pip");
   const syncPin = existsSync(syncPip) ? pinIn(await run(syncPip, ["freeze", "--disable-pip-version-check"]), "qqsync") : null;
   // The same test as the guide's PATH step's guard (grep 'qq-tools/bin:'), so a line it accepts counts.
@@ -274,7 +334,7 @@ export async function detect({ home, latest, run = read, platform = process.plat
   /** @type {string[]} */
   const qqBehind = [];
   if (qqHere) {
-    if (!work.length && latest && commit && latest !== commit) qqBehind.push(`qq ${commit.slice(0, 7)} is behind ${latest.slice(0, 7)}`);
+    if (!work.length && latest && commit && latest !== commit) qqBehind.push(`qq is at ${commit.slice(0, 7)}, not setup's pin ${latest.slice(0, 7)}`);
     if (syncPin !== SYNC_PIN) qqBehind.push(syncPin ? `qqsync is at ${syncPin.slice(0, 7)}, not ${SYNC_PIN.slice(0, 7)}` : "qqsync is not installed");
     if (!qqOnPath) qqBehind.push(NOT_ON_PATH);
   }
@@ -295,13 +355,16 @@ export async function detect({ home, latest, run = read, platform = process.plat
     : null;
   return {
     qq: { installed: qqHere, broken: !qqHere && existsSync(depot), commit, latest: latest ?? null, syncPin, onPath: qqOnPath,
-      behind: qqBehind, localWork: work.length ? work.join(" and ") : null, pythonLine: pythonLineIn(home) },
-    xo: { installed: xoHere, broken: xoVenv && !xoHere, foreign: xoDir && !xoVenv, pin, onPath: xoOnPath, behind: xoHere && !xoOnPath ? [NOT_ON_PATH] : [], note },
+      behind: qqBehind, localWork: work.length ? work.join(" and ") : null, pythonLine: pythonLineIn(home),
+      auto: existsSync(join(home, "qq-tools", "auto-update")) },
+    xo: { installed: xoHere, broken: xoVenv && !xoHere, foreign: xoDir && !xoVenv, pin, onPath: xoOnPath, behind: xoHere && !xoOnPath ? [NOT_ON_PATH] : [], note,
+      auto: xoAuto },
   };
 }
 
-/** On Windows: qq is never offered, and xo is the venv at home\.xo with its programs in Scripts\. @param {string} home @param {Read} run */
-async function detectWindows(home, run) {
+/** On Windows: qq is never offered, and xo is the venv at home\.xo with its programs in Scripts\.
+ * @param {string} home @param {Read} run @param {boolean} xoAuto */
+async function detectWindows(home, run, xoAuto) {
   const venv = join(home, ".xo");
   const xoBin = join(venv, "Scripts", "xo.exe");
   // A venv, or what a remove left of one: rmdir deletes pyvenv.cfg but not an xo.exe in use (xo serve),
@@ -318,9 +381,9 @@ async function detectWindows(home, run) {
     : null;
   return {
     qq: { installed: false, broken: false, commit: null, latest: null, syncPin: null, onPath: false, behind: [], localWork: null,
-      pythonLine: null, unsupported: true },
+      pythonLine: null, unsupported: true, auto: false },
     xo: { installed: xoHere, broken: xoVenv && !xoHere, foreign: existsSync(venv) && !xoVenv, pin, onPath,
-      behind: xoHere && !onPath ? [NOT_ON_PATH] : [], note },
+      behind: xoHere && !onPath ? [NOT_ON_PATH] : [], note, auto: xoAuto },
   };
 }
 
@@ -431,13 +494,13 @@ export function pythonFloor(a) {
  * The steps for the chosen actions, in order: Python first when an install needs it, then qq, then xo.
  * @param {{ qq: Action, xo: Action }} actions
  * @param {State} state
- * @param {{ python: PythonPick, platform: string, git: boolean, demo?: string[], pythonLine?: boolean }} ctx
+ * @param {{ python: PythonPick, platform: string, git: boolean, demo?: string[], pythonLine?: boolean, auto?: boolean | null }} ctx
  *   git: git is installed; demo: the guide's demo folders to delete with qq; pythonLine: also delete
- *   qq's exact QQ_PYTHON line with qq
+ *   qq's exact QQ_PYTHON line with qq; auto: turn auto-update on or off (autoSteps), null leaves it
  * @returns {{ steps: Step[], stop: string | null }}  stop: why nothing can run
  */
-export function planSteps(actions, state, { python, platform, git, demo = [], pythonLine = false }) {
-  if (platform === "win32") return planWindows(actions, state, { python, git });
+export function planSteps(actions, state, { python, platform, git, demo = [], pythonLine = false, auto = null }) {
+  if (platform === "win32") return planWindows(actions, state, { python, git, auto });
   /** @type {Step[]} */
   const steps = [];
   const qq = usesQq(actions);
@@ -458,7 +521,7 @@ export function planSteps(actions, state, { python, platform, git, demo = [], py
   } else if (qq && python.persist && python.cmd) {
     steps.push(persistPython(python.cmd));
   }
-  if (qq) steps.push(...INSTALL);
+  if (qq) steps.push(/** @type {Step} */ (INSTALL[0]), QQ_AT_PIN, ...INSTALL.slice(1));
   if (actions.qq === "path") steps.push(/** @type {Step} */ (INSTALL[2]));
   if (actions.qq === "remove") {
     steps.push({ what: "Remove qq, qqsync and qq's cache (~/qq-tools, ~/.cache/qq)", cmd: QQ_REMOVE_TOOLS });
@@ -474,15 +537,61 @@ export function planSteps(actions, state, { python, platform, git, demo = [], py
   if ((xo || actions.xo === "update") && !state.xo.onPath) steps.push(XO.path);
   if (actions.xo === "path") steps.push(XO.path);
   if (actions.xo === "remove") steps.push(...XO.remove);
+  steps.push(...autoSteps(actions, state, auto, platform));
   return { steps, stop: null };
+}
+
+/**
+ * Whether a tool is at the commits setup installs, so the auto-update marker can name them (qq's pin is
+ * the one detect compared with, `latest`).
+ * @param {"qq" | "xo"} tool @param {State} s
+ */
+const atPin = (tool, s) => tool === "xo" ? s.xo.installed && s.xo.pin === XO_PIN
+  : s.qq.installed && !!s.qq.commit && s.qq.commit === s.qq.latest && s.qq.syncPin === SYNC_PIN;
+
+/**
+ * The auto-update marker steps, after the tools' own steps. On writes each tool's marker when setup
+ * installs or updates it, or when it is kept and already at setup's commits; off deletes the markers;
+ * null leaves the option as it is: on when either marker is there, and then a tool setup installs or
+ * updates gets its marker (again), naming the new commit. A removed tool's marker goes with it
+ * (~/qq-tools, XO.remove).
+ * @param {{ qq: Action, xo: Action }} actions @param {State} state @param {boolean | null} auto @param {string} platform
+ * @returns {Step[]}
+ */
+export function autoSteps(actions, state, auto, platform) {
+  /** @type {Step[]} */
+  const steps = [];
+  const on = auto ?? (state.qq.auto || state.xo.auto);
+  for (const tool of /** @type {const} */ (["qq", "xo"])) {
+    if (actions[tool] === "remove" || state[tool].unsupported) continue;
+    const marker = tool === "xo" && platform === "win32" ? AUTO.xoWin : AUTO[tool];
+    const fresh = actions[tool] === "install" || actions[tool] === "update";
+    if (auto === false) {
+      if (state[tool].auto) steps.push(marker.off);
+    } else if (fresh ? on : auto === true && !state[tool].auto && atPin(tool, state)) {
+      steps.push(marker.on);
+    }
+  }
+  return steps;
+}
+
+/**
+ * What turning auto-update on leaves out: a kept tool that is not at setup's commits.
+ * @param {{ qq: Action, xo: Action }} actions @param {State} state @param {boolean | null} auto @returns {string[]}
+ */
+export function autoNotes(actions, state, auto) {
+  if (auto !== true) return [];
+  return /** @type {const} */ (["qq", "xo"]).filter((t) => state[t].installed && !state[t].auto && !atPin(t, state) &&
+    !["install", "update", "remove"].includes(actions[t]))
+    .map((t) => `Auto-update stays off for ${t}: it is not at setup's commit. Update it here to turn it on.`);
 }
 
 /**
  * The steps on Windows, in cmd.exe: xo only, since qq does not run there.
  * @param {{ qq: Action, xo: Action }} actions @param {State} state
- * @param {{ python: PythonPick, git: boolean }} ctx @returns {{ steps: Step[], stop: string | null }}
+ * @param {{ python: PythonPick, git: boolean, auto?: boolean | null }} ctx @returns {{ steps: Step[], stop: string | null }}
  */
-function planWindows(actions, state, { python, git }) {
+function planWindows(actions, state, { python, git, auto = null }) {
   /** @type {Step[]} */
   const steps = [];
   if (actions.qq !== "keep") return { steps, stop: "qq runs on Linux and macOS, so qq-setup cannot install, update or remove it on Windows" };
@@ -495,6 +604,7 @@ function planWindows(actions, state, { python, git }) {
   else if (actions.xo === "update") steps.push(XO_WIN.update);
   if (((xo || actions.xo === "update") && !state.xo.onPath) || actions.xo === "path") steps.push(XO_WIN.path);
   if (actions.xo === "remove") steps.push(...XO_WIN.remove);
+  steps.push(...autoSteps(actions, state, auto, "win32"));
   return { steps, stop: null };
 }
 
@@ -522,15 +632,15 @@ export function choices(t) {
  * Everything the steps need: the Python and git checks, the steps in order, and the environment they
  * run with (QQ_PYTHON set to the Python picked, or brew's python3.13 once the Mac step has run).
  * @param {{ qq: Action, xo: Action }} actions @param {State} state
- * @param {{ demo: string[], pythonLine?: boolean, env: NodeJS.ProcessEnv, platform: string, run: Read }} o
+ * @param {{ demo: string[], pythonLine?: boolean, auto?: boolean | null, env: NodeJS.ProcessEnv, platform: string, run: Read }} o
  * @returns {Promise<{ steps: Step[], stop: string | null, python: PythonPick, env: NodeJS.ProcessEnv }>}
  */
-export async function prepare(actions, state, { demo, pythonLine = false, env, platform, run }) {
+export async function prepare(actions, state, { demo, pythonLine = false, auto = null, env, platform, run }) {
   const needs = usesQq(actions) || freshXo(actions, state);
   const python = needs ? await pickPython(env, pythonFloor(actions), run, platform) : { cmd: null, version: null, ok: true, persist: false };
   // xo's update reinstalls from a git+https spec, so it needs git even when it needs no Python.
   const git = !(needs || actions.xo === "update") || (await run("git", ["--version"], env)) !== null;
-  const { steps, stop } = planSteps(actions, state, { python, platform, git, demo, pythonLine });
+  const { steps, stop } = planSteps(actions, state, { python, platform, git, demo, pythonLine, auto });
   const py = python.ok ? python.cmd : platform === "darwin" ? "python3.13" : null;
   return { steps, stop, python, env: py ? { ...env, QQ_PYTHON: py } : env };
 }
@@ -559,14 +669,15 @@ export function describe(s) {
     : !s.qq.installed ? "not installed"
       : `installed at ${s.qq.commit?.slice(0, 7) ?? "an unknown commit"}` +
         (s.qq.localWork ? `, with local work (${s.qq.localWork})`
-          : s.qq.latest ? (s.qq.latest === s.qq.commit ? " (the newest)" : `, newest is ${s.qq.latest.slice(0, 7)}`) : " (could not check the newest)") +
+          : s.qq.latest ? (s.qq.latest === s.qq.commit ? " (setup's pin)" : `, setup's pin is ${s.qq.latest.slice(0, 7)}`) : "") +
         `; qqsync ${s.qq.syncPin ? `at ${s.qq.syncPin.slice(0, 7)}` : "missing"}` +
-        `; ${s.qq.onPath ? "on PATH" : "not on PATH"}` + (pathOnly(s.qq) ? ": needs its PATH step" : s.qq.behind.length ? ": update available" : s.qq.localWork ? "" : ": up to date");
+        `; ${s.qq.onPath ? "on PATH" : "not on PATH"}` + (s.qq.auto ? "; auto-update on" : "") +
+        (pathOnly(s.qq) ? ": needs its PATH step" : s.qq.behind.length ? ": update available" : s.qq.localWork ? "" : ": up to date");
   const dir = s.qq.unsupported ? "%USERPROFILE%\\.xo" : "~/.xo";
   const xo = s.xo.foreign ? `${dir} is there but is not an xo install (no pyvenv.cfg); it is left alone`
     : s.xo.broken ? `not working: ${dir} is xo's venv but its xo does not run`
     : !s.xo.installed ? "not installed"
-      : `installed at ${s.xo.pin?.slice(0, 7) ?? "an unknown commit"}; ${s.xo.onPath ? "on PATH" : "not on PATH"}` +
+      : `installed at ${s.xo.pin?.slice(0, 7) ?? "an unknown commit"}; ${s.xo.onPath ? "on PATH" : "not on PATH"}` + (s.xo.auto ? "; auto-update on" : "") +
         (s.xo.pin !== XO_PIN ? `: not at setup's pin (${XO_PIN.slice(0, 7)})` : pathOnly(s.xo) ? ": needs its PATH step" : s.xo.behind.length ? ": update available" : ": up to date");
   return [`  qq  ${qq}`, `  xo  ${xo}`];
 }
@@ -615,7 +726,7 @@ export function runStep(cmd, env) {
 
 const USAGE = `qq-setup install: install, update or remove qq (with qqsync) and xo on this machine.
 
-  npx --allow-remote=root https://codeload.github.com/quirq-ai/setup/tar.gz/<commit> install [--only qq|xo] [--update | --remove] [--yes] [--dry-run]
+  npx --allow-remote=root https://codeload.github.com/quirq-ai/setup/tar.gz/<commit> install [--only qq|xo] [--update | --remove] [--auto-update | --no-auto-update] [--yes] [--dry-run]
 
 It shows what is installed, asks what to do with each tool (install what is missing; update, remove or
 keep what is there), prints the exact commands, and runs them after you say yes. On Windows it handles
@@ -624,6 +735,10 @@ xo only, in %USERPROFILE%\\.xo with cmd.exe commands; qq runs on Linux and macOS
   --only qq|xo   only this tool (qq includes qqsync); default both
   --update       update what is installed (rerun its install), install what is missing
   --remove       remove the tools instead
+  --auto-update  turn auto-update on: before a command, qq and xo update themselves to the commit
+                 setup installs (its pins.json on main), checked at most once a day. Off unless
+                 you turn it on; a qq or xo installed some other way is left alone
+  --no-auto-update  turn it off. Without either, it stays as it is
   --yes          no questions: do the default (or --update / --remove) and run it. It keeps a qq
                  checkout with local work git can see (files git status lists, commits on no remote
                  branch, stashes, other worktrees) or that git cannot check, keeps the qq guide's
@@ -668,8 +783,8 @@ async function choose(p, q, keys) {
  */
 export async function main(argv, io = realIo()) {
   const { out, err } = io;
-  /** @type {{ only: ("qq" | "xo")[], update: boolean, remove: boolean, yes: boolean, dryRun: boolean }} */
-  const f = { only: ["qq", "xo"], update: false, remove: false, yes: false, dryRun: false };
+  /** @type {{ only: ("qq" | "xo")[], update: boolean, remove: boolean, yes: boolean, dryRun: boolean, auto: boolean | null }} */
+  const f = { only: ["qq", "xo"], update: false, remove: false, yes: false, dryRun: false, auto: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--help" || a === "-h") return out(USAGE), 0;
@@ -677,6 +792,11 @@ export async function main(argv, io = realIo()) {
     else if (a === "--remove") f.remove = true;
     else if (a === "--yes" || a === "-y") f.yes = true;
     else if (a === "--dry-run") f.dryRun = true;
+    else if (a === "--auto-update" || a === "--no-auto-update") {
+      const on = a === "--auto-update";
+      if (f.auto === !on) return err("qq-setup install: --auto-update and --no-auto-update do not go together"), 2;
+      f.auto = on;
+    }
     else if (a === "--only" && (argv[i + 1] === "qq" || argv[i + 1] === "xo")) f.only = [/** @type {"qq" | "xo"} */ (argv[++i])];
     else return err(`qq-setup install: unknown option ${a}${a === "--only" ? " (use --only qq or --only xo)" : ""}\n\n${USAGE}`), 2;
   }
@@ -695,7 +815,7 @@ export async function main(argv, io = realIo()) {
     return err(`qq-setup install: ${windows ? "USERPROFILE" : "HOME"} must be set to an absolute path`), 2;
   }
   out("Looking at what is installed...");
-  const state = await detect({ home, latest: io.latest, run: io.run, platform: io.platform });
+  const state = await detect({ home, latest: io.latest, run: io.run, platform: io.platform, env: io.env });
   if (windows) out(`  qq: ${windowsNote(io.env, process.cwd())}`);
   for (const line of describe(state)) out(line);
   const interactive = !f.yes && !f.dryRun && io.tty;
@@ -764,12 +884,27 @@ export async function main(argv, io = realIo()) {
       pythonLine = !!prompt && (await choose(prompt, `Also delete the ${py.line} line from ${where} (unless something else uses that Python)? [y/N] `, ["no", "yes"])) === "yes";
     }
 
-    const { steps, stop, python, env } = await prepare(actions, state, { demo, pythonLine, env: io.env, platform: io.platform, run: io.run });
+    // One option for both tools, asked when a tool stays or will be installed, unless a flag says.
+    let auto = f.auto;
+    const kept = f.only.filter((t) => actions[t] !== "remove" && (state[t].installed || actions[t] === "install" || actions[t] === "update"));
+    if (prompt && auto === null && kept.length) {
+      const on = f.only.some((t) => state[t].auto);
+      const names = f.only.join(" and ");
+      auto = on
+        ? (await choose(prompt, `Auto-update is on: ${names} update${f.only.length > 1 ? "" : "s"} to setup's reviewed commit when you run ${f.only.length > 1 ? "them" : "it"}. Keep it on? [Y/n] `, ["yes", "no"])) === "yes"
+        : (await choose(prompt, `Turn on auto-update? Before a command, ${names} then update${f.only.length > 1 ? "" : "s"} to setup's reviewed commit (checked once a day). [y/N] `, ["no", "yes"])) === "yes";
+      if (auto === on && !(on && kept.some((t) => !state[t].auto))) auto = null;
+    }
+    // --only: the other tool's option is left as it is.
+    const scoped = { qq: f.only.includes("qq") ? state.qq : { ...state.qq, unsupported: true },
+      xo: f.only.includes("xo") ? state.xo : { ...state.xo, unsupported: true } };
+    const { steps, stop, python, env } = await prepare(actions, scoped, { demo, pythonLine, auto, env: io.env, platform: io.platform, run: io.run });
     if (stop) return err(`\nqq-setup install: ${stop}`), 1;
     if (!steps.length) return out("\nNothing to do."), 0;
     out(`\n${f.dryRun ? "It would run" : "It will run"} these, in order:`);
     steps.forEach((s, i) => out(`  ${i + 1}. ${s.what}:\n     ${s.cmd}`));
     if (python.ok && python.cmd && python.cmd !== "python3") out(`With QQ_PYTHON=${python.cmd} (${python.version}).`);
+    for (const line of autoNotes(actions, scoped, auto)) out(line);
     if (f.dryRun) return out("\nDry run: nothing was run."), 0;
     if (prompt) go = (await choose(prompt, "\nRun them now? [y/N] ", ["no", "yes"])) === "yes";
     if (!go) return out("Nothing was run."), 1;

@@ -80,7 +80,7 @@ export function MachinePanel({ onDone, onLook, held }: {
       setM(s);
       onLook(s);
       seen.current = s.seen;
-      choose({ qq: "keep", xo: "keep", demo: [], python: false });
+      choose({ qq: "keep", xo: "keep", demo: [], python: false, auto: null });
     },
     [choose, onLook],
   );
@@ -157,6 +157,7 @@ export function MachinePanel({ onDone, onLook, held }: {
   const losesWork = !!m.qq.localWork && ["install", "update", "remove"].includes(choice.qq);
   const plan = planned && planned.key === JSON.stringify(choice) ? planned.plan : null;
   const steps = plan?.steps ?? [];
+  const tools = m.platform === "win32" ? "xo" : "qq and xo";
 
   return (
     <>
@@ -207,6 +208,24 @@ export function MachinePanel({ onDone, onLook, held }: {
               </fieldset>
             );
           })}
+
+          {(m.qq.choices.length > 0 || m.xo.choices.length > 0) && (
+            <fieldset className="flex flex-col gap-2" disabled={running}>
+              <legend className="font-medium">Auto-update</legend>
+              <p className="text-sm text-muted-foreground">
+                Off unless you tick it. When on, {tools} check once a day for the commit setup has reviewed, and update to it
+                before running your command. {m.platform === "win32" ? "An xo" : "A qq or xo"} you installed some other way is left alone.
+              </p>
+              <div className="flex items-center gap-3">
+                <Checkbox
+                  id="auto-update"
+                  checked={choice.auto ?? m.auto}
+                  onCheckedChange={(v) => choose({ ...choice, auto: v === true })}
+                />
+                <Label htmlFor="auto-update">Keep {tools} up to date automatically</Label>
+              </div>
+            </fieldset>
+          )}
 
           {choice.qq === "remove" && m.qq.pythonLine && (
             <fieldset className="flex flex-col gap-2" disabled={running}>

@@ -12,11 +12,11 @@ import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { windowsNote } from "./windows.mjs";
-import { afterNotes, choices, DEMO, describe, detect, prepare, read, stepCommand, XO_PIN } from "./install.mjs";
+import { afterNotes, autoNotes, choices, DEMO, describe, detect, prepare, read, stepCommand, XO_PIN } from "./install.mjs";
 
 /** @typedef {import("./install.mjs").Action} Action */
 /** @typedef {import("./install.mjs").State} State */
-/** @typedef {{ qq: Action, xo: Action, demo: string[], python: boolean }} Choice */
+/** @typedef {{ qq: Action, xo: Action, demo: string[], python: boolean, auto: boolean | null }} Choice  auto: turn auto-update on or off, null leaves it */
 
 /** The longest log the page is sent; later output still reaches the terminal. */
 const MAX_LOG = 256 * 1024;
@@ -46,14 +46,14 @@ export function machine({ home, env, platform, run = read, runStep: step = piped
   let planSeq = 0;
   const busy = () => starting || (!!current && !current.done);
 
-  const look = () => detect({ home, latest, run, platform });
+  const look = () => detect({ home, latest, run, platform, env });
   const demoHere = () => DEMO.filter((d) => existsSync(join(home, d)));
   // What the page was shown: a run starts only while the machine still looks the same (local work included).
   const seen = (/** @type {State} */ s) => JSON.stringify([describe(s), s.qq.localWork, s.qq.pythonLine, demoHere()]);
 
   /** @param {State} state @param {Choice} choice */
   const stepsFor = (state, choice) =>
-    prepare({ qq: choice.qq, xo: choice.xo }, state, { demo: choice.demo, pythonLine: choice.python, env, platform, run });
+    prepare({ qq: choice.qq, xo: choice.xo }, state, { demo: choice.demo, pythonLine: choice.python, auto: choice.auto, env, platform, run });
 
   return {
     /** What the panel shows: each tool's line, its choices (the default first) and what to warn about. */
@@ -66,6 +66,8 @@ export function machine({ home, env, platform, run = read, runStep: step = piped
         running: busy(),
         seen: seen(s),
         demo: demoHere(),
+        // Auto-update is on when either tool's marker is there.
+        auto: s.qq.auto || s.xo.auto,
         qq: { line: qqLine, choices: choices(s.qq), installed: s.qq.installed, broken: s.qq.broken, localWork: s.qq.localWork,
           pythonLine: s.qq.pythonLine, note: s.qq.unsupported ? windowsNote(env, process.cwd()) : null },
         xo: { line: xoLine, choices: choices(s.xo), installed: s.xo.installed, broken: s.xo.broken, foreign: s.xo.foreign, note: s.xo.note },
@@ -95,7 +97,7 @@ export function machine({ home, env, platform, run = read, runStep: step = piped
         return { ok: /** @type {const} */ (true), id: null, steps: [], stop: p.stop, notes: [] };
       }
       plan = { id: randomBytes(16).toString("base64url"), choice: c.choice, cmds: p.steps.map((x) => x.cmd), seen: seen(s) };
-      return { ok: /** @type {const} */ (true), id: plan.id, steps: p.steps, stop: null, notes: planNotes(c.choice) };
+      return { ok: /** @type {const} */ (true), id: plan.id, steps: p.steps, stop: null, notes: [...planNotes(c.choice), ...autoNotes(c.choice, s, c.choice.auto)] };
     },
 
     /** Run the latest plan, by its id, once. @param {unknown} body */
@@ -181,17 +183,17 @@ export function machine({ home, env, platform, run = read, runStep: step = piped
 }
 
 /**
- * Accept only `{ qq, xo, demo, python }`, each action one this tool's state offers, and demo folders
- * and the QQ_PYTHON line only with qq's remove and only when they are there.
+ * Accept only `{ qq, xo, demo, python, auto }`, each action one this tool's state offers, demo folders
+ * and the QQ_PYTHON line only with qq's remove and only when they are there, and auto true, false or null.
  * @param {unknown} body @param {State} s @param {string[]} demoHere
  * @returns {{ ok: true, choice: Choice } | { ok: false, error: string }}
  */
 export function checkChoice(body, s, demoHere) {
   if (!body || typeof body !== "object" || Array.isArray(body)) return { ok: false, error: "expected an object" };
   const b = /** @type {Record<string, unknown>} */ (body);
-  for (const k of Object.keys(b)) if (!["qq", "xo", "demo", "python"].includes(k)) return { ok: false, error: `unexpected field: ${k}` };
+  for (const k of Object.keys(b)) if (!["qq", "xo", "demo", "python", "auto"].includes(k)) return { ok: false, error: `unexpected field: ${k}` };
   /** @type {Choice} */
-  const choice = { qq: "keep", xo: "keep", demo: [], python: false };
+  const choice = { qq: "keep", xo: "keep", demo: [], python: false, auto: null };
   for (const tool of /** @type {const} */ (["qq", "xo"])) {
     const a = b[tool] ?? "keep";
     const offered = choices(s[tool]);
@@ -210,6 +212,9 @@ export function checkChoice(body, s, demoHere) {
   if (typeof python !== "boolean") return { ok: false, error: "python: true or false" };
   if (python && (choice.qq !== "remove" || !s.qq.pythonLine)) return { ok: false, error: "the QQ_PYTHON line is deleted only with qq's remove, and only when it is there" };
   choice.python = python;
+  const auto = b.auto ?? null;
+  if (auto !== null && typeof auto !== "boolean") return { ok: false, error: "auto: true, false or null" };
+  choice.auto = auto;
   return { ok: true, choice };
 }
 

@@ -1,14 +1,14 @@
 // @ts-check
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
 
 import {
-  BREW_PYTHON, choices, cleanTmp, DEMO, defaultAction, describe, detect, findExe, localWork, main, persistPython, pickPython, pinIn, planSteps, PYTHON_HELP, pythonOk,
-  PINS, QQ_REMOVE, QQ_REMOVE_TOOLS, read, removeLineCmd, stepCommand, SYNC_PIN, systemExe, XO, XO_PATH_LINE, XO_PIN, XO_SPEC, XO_WIN,
+  AUTO, autoNotes, BREW_PYTHON, choices, cleanTmp, DEMO, defaultAction, describe, detect, findExe, localWork, main, persistPython, pickPython, pinIn, planSteps, PYTHON_HELP, pythonOk,
+  PINS, QQ_AT_PIN, QQ_PIN, QQ_REMOVE, QQ_REMOVE_TOOLS, read, removeLineCmd, stepCommand, SYNC_PIN, systemExe, XO, XO_PATH_LINE, XO_PIN, XO_SPEC, XO_WIN, xoConfig,
 } from "../cli/install.mjs";
 import { INSTALL, MAC_PYTHON } from "../cli/tools.mjs";
 
@@ -34,7 +34,7 @@ test("qq's remove commands are the qq guide's, at the commit install.mjs names, 
   const cleaned = cleanTmp(QQ_REMOVE[1]);
   assert.equal(cleaned.split('{ rm -f "$f.qq-tmp"; exit 1; };').length, 3);
   assert.doesNotMatch(cleaned, /\|\| exit 1;/);
-  assert.ok(XO.remove[2].cmd.includes(`grep -qsxF '${XO_PATH_LINE}'`));
+  assert.ok(XO.remove[3].cmd.includes(`grep -qsxF '${XO_PATH_LINE}'`));
 });
 
 test("xo's commands follow the xo quickstart at the commit install.mjs names", () => {
@@ -46,7 +46,7 @@ test("xo's commands follow the xo quickstart at the commit install.mjs names", (
   assert.ok(XO.remove[0].cmd.startsWith(`( ~/.xo/bin/${logout} || {`), "by path: xo may not be on PATH in this shell");
   assert.equal(XO.remove[0].cmd, `( ~/.xo/bin/${logout} || { case "$XDG_CONFIG_HOME" in /*) c="$XDG_CONFIG_HOME" ;; *) c="$HOME/.config" ;; esac; ` +
     'rm -f "$c/xo/credentials" "$c/xo/services" && echo "xo logout did not run; deleted $c/xo/credentials and $c/xo/services instead"; } )');
-  assert.equal(XO.remove[1].cmd, rm);
+  assert.equal(XO.remove[2].cmd, rm);
   assert.equal(SYNC_PIN, /sync@([0-9a-f]{40})/.exec(INSTALL[1].cmd)?.[1]);
   assert.equal(BREW_PYTHON.cmd, "brew install python@3.13");
 });
@@ -54,8 +54,10 @@ test("xo's commands follow the xo quickstart at the commit install.mjs names", (
 test("pins.json holds every pin setup installs, and nothing else names another", () => {
   const file = JSON.parse(readFileSync(new URL("../pins.json", import.meta.url), "utf8"));
   assert.deepEqual(PINS, file);
-  assert.deepEqual(Object.keys(file).sort(), ["qqsync", "schema", "xo"]);
+  assert.deepEqual(Object.keys(file).sort(), ["qq", "qqsync", "schema", "xo"]);
   assert.equal(XO_PIN, file.xo);
+  assert.equal(QQ_PIN, file.qq);
+  assert.ok(QQ_AT_PIN.cmd.includes(`reset -q --keep ${QQ_PIN};`));
   // qqsync's commit stays inside the qq guide's command (tools.mjs, checked against the guide), so the
   // two must agree: a pin move changes both in one PR.
   assert.equal(SYNC_PIN, file.qqsync, "cli/tools.mjs installs qqsync at another commit than pins.json");
@@ -110,16 +112,18 @@ test("pickPython: QQ_PYTHON, else python3, else the newest python3.N, which qq m
 });
 
 /** @type {import("../cli/install.mjs").State} */
-const none = { qq: { installed: false, broken: false, commit: null, latest: null, syncPin: null, onPath: false, behind: [], localWork: null },
-  xo: { installed: false, broken: false, foreign: false, pin: null, onPath: false, behind: [], note: null } };
+const none = { qq: { installed: false, broken: false, commit: null, latest: null, syncPin: null, onPath: false, behind: [], localWork: null, pythonLine: null, auto: false },
+  xo: { installed: false, broken: false, foreign: false, pin: null, onPath: false, behind: [], note: null, auto: false } };
 const here = { qq: { ...none.qq, installed: true, onPath: true }, xo: { ...none.xo, installed: true, onPath: true, pin: XO_PIN } };
 const py = { cmd: "python3", version: "Python 3.13.16", ok: true, persist: false };
 const linux = { python: py, platform: "linux", git: true };
+/** qq's install: the guide's clone, then qq moved to setup's pin, then the rest of the guide's steps. */
+const QQ_STEPS = [INSTALL[0], QQ_AT_PIN, ...INSTALL.slice(1)];
 
 test("planSteps: install, update and remove, in order", () => {
-  assert.deepEqual(planSteps({ qq: "install", xo: "install" }, none, linux).steps, [...INSTALL, XO.install, XO.path]);
+  assert.deepEqual(planSteps({ qq: "install", xo: "install" }, none, linux).steps, [...QQ_STEPS, XO.install, XO.path]);
   assert.deepEqual(planSteps({ qq: "keep", xo: "update" }, here, linux).steps, [XO.update]);
-  assert.deepEqual(planSteps({ qq: "update", xo: "keep" }, here, linux).steps, INSTALL);
+  assert.deepEqual(planSteps({ qq: "update", xo: "keep" }, here, linux).steps, QQ_STEPS);
   const gone = planSteps({ qq: "remove", xo: "remove" }, here, linux).steps.map((s) => s.cmd);
   assert.deepEqual(gone, [QQ_REMOVE_TOOLS, cleanTmp(QQ_REMOVE[1]), ...XO.remove.map((s) => s.cmd)]);
   const withDemo = planSteps({ qq: "remove", xo: "keep" }, here, { ...linux, demo: ["qq-try"] }).steps.map((s) => s.cmd);
@@ -139,7 +143,7 @@ test("planSteps: Python comes first when an install needs it", () => {
   // On a Mac: brew's Python, then the QQ_PYTHON line in the file the PATH step writes (not always ~/.zshrc,
   // or a bash user's next terminal has qq on PATH but no QQ_PYTHON).
   const mac = planSteps({ qq: "install", xo: "keep" }, none, { python: old, platform: "darwin", git: true }).steps;
-  assert.deepEqual(mac, [BREW_PYTHON, persistPython("python3.13"), ...INSTALL]);
+  assert.deepEqual(mac, [BREW_PYTHON, persistPython("python3.13"), ...QQ_STEPS]);
   assert.ok(!mac.some((x) => x.cmd.includes("~/.zshrc; }")), "not the guide's zsh-only line");
   // xo alone on a Mac: brew's Python, but no QQ_PYTHON line.
   assert.deepEqual(planSteps({ qq: "keep", xo: "install" }, none, { python: old, platform: "darwin", git: true }).steps,
@@ -160,7 +164,7 @@ test("planSteps: Python comes first when an install needs it", () => {
     /QQ_PYTHON is set to \/opt\/py310\/bin\/python3: point it at python3\.13\.$/);
   const brewed = planSteps({ qq: "install", xo: "keep" }, none, { python: { cmd: "python3.13", version: "Python 3.13.16", ok: true, persist: true }, platform: "darwin", git: true }).steps;
   assert.match(brewed[0].cmd, /grep -qs 'QQ_PYTHON=' "\$rc" \|\| printf '\\nexport QQ_PYTHON=python3\.13\\n'/);
-  assert.deepEqual(brewed.slice(1), INSTALL);
+  assert.deepEqual(brewed.slice(1), QQ_STEPS);
   assert.deepEqual(planSteps({ qq: "keep", xo: "install" }, none, { python: { cmd: "python3.13", version: "x", ok: true, persist: true }, platform: "darwin", git: true }).steps,
     [XO.install, XO.path]);
 });
@@ -220,13 +224,13 @@ test("detect reads what a previous install left", async () => {
   const old = "1".repeat(40);
   const s = await detect({ home, latest: "b".repeat(40), run: fakeRun({ xoPin: old }) });
   assert.deepEqual(s.qq, { installed: true, broken: false, commit: "a".repeat(40), latest: "b".repeat(40), syncPin: SYNC_PIN, onPath: true,
-    behind: ["qq aaaaaaa is behind bbbbbbb"], localWork: null, pythonLine: null });
+    behind: ["qq is at aaaaaaa, not setup's pin bbbbbbb"], localWork: null, pythonLine: null, auto: false });
   // An xo commit other than the pin may be newer: a note, not "behind". Missing only its PATH line,
   // it gets just that line, never a reinstall at the pin.
   assert.deepEqual(s.xo.behind, ["not on PATH"]);
   assert.match(s.xo.note ?? "", /xo is at 1111111, not setup's pin .{7}; updating would put it at/);
   const lines = describe(s);
-  assert.match(lines[0], /qq {2}installed at aaaaaaa, newest is bbbbbbb; qqsync at .{7}; on PATH: update available/);
+  assert.match(lines[0], /qq {2}installed at aaaaaaa, setup's pin is bbbbbbb; qqsync at .{7}; on PATH: update available/);
   assert.match(lines[1], /xo {2}installed at 1111111; not on PATH: not at setup's pin/);
   assert.equal(defaultAction(s.xo, {}), "path");
   assert.deepEqual(planSteps({ qq: "keep", xo: defaultAction(s.xo, {}) }, s, linux).steps, [XO.path]);
@@ -352,7 +356,7 @@ test("windows: the steps are cmd.exe commands for xo only, with Windows' Python 
   // PowerShell's -Command is one quoted cmd.exe argument: no double quote inside it. It stops at its first
   // error, so a refused registry write is never followed by the line saying it worked.
   const PS = /^"%SystemRoot%\\System32\\WindowsPowerShell\\v1\.0\\powershell\.exe" -NoProfile -NonInteractive -Command "\$ErrorActionPreference = 'Stop'; /;
-  for (const s of [XO_WIN.path, XO_WIN.remove[2]]) {
+  for (const s of [XO_WIN.path, XO_WIN.remove[3]]) {
     assert.match(s.cmd, PS, s.what);
     const inner = s.cmd.replace(PS, "");
     assert.ok(inner.endsWith('"') && !inner.slice(0, -1).includes('"'), s.what);
@@ -362,7 +366,7 @@ test("windows: the steps are cmd.exe commands for xo only, with Windows' Python 
     assert.ok(inner.includes("$ours = @($parts | Where-Object { [Environment]::ExpandEnvironmentVariables($_).TrimEnd('\\') -eq $d }); "), s.what);
   }
   assert.ok(XO_WIN.path.cmd.includes("if (-not $ours.Count) { $k.SetValue('Path', (@($parts) + $d) -join ';', 'ExpandString'); "));
-  assert.ok(XO_WIN.remove[2].cmd.includes("if ($ours.Count) { $k.SetValue('Path', (@($parts | Where-Object { $ours -notcontains $_ })) -join ';', 'ExpandString'); "));
+  assert.ok(XO_WIN.remove[3].cmd.includes("if ($ours.Count) { $k.SetValue('Path', (@($parts | Where-Object { $ours -notcontains $_ })) -join ';', 'ExpandString'); "));
   // No %VAR% outside double quotes, where a ) or & in a folder name would break cmd.exe's line.
   for (const s of [XO_WIN.install, XO_WIN.path, XO_WIN.update, ...XO_WIN.remove]) {
     assert.doesNotMatch(s.cmd.replace(/"[^"]*"/g, ""), /%/, s.what);
@@ -431,8 +435,8 @@ test("windows: findExe looks in PATH's absolute folders only, never the current 
 });
 
 test("windows: remove logs xo out, then deletes only %USERPROFILE%\\.xo, then only xo's PATH entries", () => {
-  const [logout, folder, path] = XO_WIN.remove;
-  assert.deepEqual([logout.what, folder.what], [XO.remove[0].what, XO.remove[1].what]);
+  const [logout, files, folder, path] = XO_WIN.remove;
+  assert.deepEqual([logout.what, files.what, folder.what], XO.remove.slice(0, 3).map((s) => s.what));
   assert.match(path.what, /^Take xo off your PATH/);
   // The folder, and only it; then a failure when anything of it is left (a file in use).
   assert.equal(folder.cmd, 'rmdir /s /q "%USERPROFILE%\\.xo" & if exist "%USERPROFILE%\\.xo\\" ' +
@@ -517,9 +521,9 @@ test("main: Enter never removes, and Enter at 'Run them now?' runs nothing", asy
 
 test("main: the prompt is closed before any step runs, steps get QQ_PYTHON, and a failed step stops the rest", async () => {
   const home = mkdtempSync(join(tmpdir(), "qq-setup-new-"));
-  const r = await drive([], { home, answers: ["y", "y", "y"], codes: [0, 3], run: fakeRun() });
+  const r = await drive([], { home, answers: ["y", "y", "", "y"], codes: [0, 3], run: fakeRun() });
   assert.equal(r.code, 2);
-  assert.deepEqual(r.steps, [INSTALL[0].cmd, INSTALL[1].cmd], "nothing after the failed step");
+  assert.deepEqual(r.steps, [INSTALL[0].cmd, QQ_AT_PIN.cmd], "nothing after the failed step");
   assert.deepEqual(r.closedFirst, [true, true]);
   assert.equal(r.envs[0].QQ_PYTHON, "python3");
   assert.match(r.out.join("\n"), /step 2 exited 3; the steps after it did not run/);
@@ -570,7 +574,7 @@ test("main: while removing qq, Enter at 'Install xo?' installs nothing", async (
 
 test("main: a broken xo is offered a reinstall, and --remove removes it", async () => {
   const home = fakeHome();
-  const r = await drive(["--only", "xo"], { home, answers: ["", "y"], run: fakeRun({ xoRuns: false }) });
+  const r = await drive(["--only", "xo"], { home, answers: ["", "", "y"], run: fakeRun({ xoRuns: false }) });
   assert.match(r.asked[0], /xo is there but not working\. Reinstall, delete or keep it\? \[R\/d\/k\]/);
   assert.deepEqual(r.steps, [XO.install.cmd, XO.path.cmd]);
   const rm = await drive(["--only", "xo", "--remove", "--yes"], { home, tty: false, run: fakeRun({ xoRuns: false }) });
@@ -605,7 +609,7 @@ test("main: a ~/.xo that is not xo's is never installed over or removed", async 
 test("main: an installed tool missing only its PATH line is asked about adding it, and Enter adds just that", async () => {
   const home = fakeHome();
   writeFileSync(join(home, ".zshrc"), `export PATH="$HOME/qq-tools/bin:$PATH"\n`);
-  const r = await drive(["--only", "xo"], { home, answers: ["", "y"], run: fakeRun({ xoPin: "1".repeat(40) }) });
+  const r = await drive(["--only", "xo"], { home, answers: ["", "", "y"], run: fakeRun({ xoPin: "1".repeat(40) }) });
   assert.match(r.asked[0], /xo is installed but not on PATH\. Add the PATH line, update, remove or keep it\? \[A\/u\/r\/k\]/);
   assert.deepEqual(r.steps, [XO.path.cmd]);
 });
@@ -717,4 +721,75 @@ test("cli: install --dry-run on an empty home lists the steps and runs nothing",
   assert.ok(r.stdout.includes(XO.install.cmd) && r.stdout.includes(XO.path.cmd));
   assert.ok(!r.stdout.includes(INSTALL[0].cmd), "--only xo leaves qq alone");
   assert.match(r.stdout, /Dry run: nothing was run\./);
+});
+
+test("auto-update: the markers are what xo and qq read, and the option writes, keeps or deletes them", async () => {
+  // Run the marker steps in a real shell: the files must be what xo selfupdate.py and qq bootstrap.py parse.
+  const home = fakeHome();
+  writeFileSync(join(home, ".zshrc"), `export PATH="$HOME/qq-tools/bin:$PATH"\n${XO_PATH_LINE}\n`);
+  const sh = (/** @type {string} */ cmd, /** @type {Record<string, string>} */ env = {}) =>
+    execFileSync("/bin/sh", ["-c", cmd], { env: { PATH: process.env.PATH, HOME: home, ...env }, encoding: "utf8" });
+  sh(AUTO.xo.on.cmd);
+  assert.equal(readFileSync(join(home, ".config", "xo", "auto-update"), "utf8"), `${XO_PIN}\n`);
+  sh(AUTO.qq.on.cmd);
+  assert.deepEqual(JSON.parse(readFileSync(join(home, "qq-tools", "auto-update"), "utf8")), { qq: QQ_PIN, qqsync: SYNC_PIN });
+  // An absolute XDG_CONFIG_HOME is xo's config folder, as xo client.py; a relative one is not.
+  const xdg = join(home, "xdg");
+  sh(AUTO.xo.on.cmd, { XDG_CONFIG_HOME: xdg });
+  assert.equal(readFileSync(join(xdg, "xo", "auto-update"), "utf8"), `${XO_PIN}\n`);
+  assert.equal(xoConfig(home, { XDG_CONFIG_HOME: xdg }, "linux"), join(xdg, "xo"));
+  assert.equal(xoConfig(home, { XDG_CONFIG_HOME: "rel" }, "linux"), join(home, ".config", "xo"));
+  assert.equal(xoConfig("C:\\Users\\me", { XDG_CONFIG_HOME: "D:\\cfg" }, "win32"), join("D:\\cfg", "xo"));
+  // env: not this process's, where a runner's XDG_CONFIG_HOME would point elsewhere.
+  const s = await detect({ home, latest: "a".repeat(40), run: fakeRun(), env: { HOME: home } });
+  assert.deepEqual([s.qq.auto, s.xo.auto], [true, true]);
+  assert.match(describe(s)[0], /; auto-update on: up to date/);
+  sh(AUTO.qq.off.cmd);
+  sh(AUTO.xo.off.cmd);
+  assert.deepEqual([existsSync(join(home, "qq-tools", "auto-update")), existsSync(join(home, ".config", "xo", "auto-update"))], [false, false]);
+  // Removing xo deletes all its auto-update files, so a later install starts with the option off.
+  for (const f of ["auto-update", "auto-update.json", "auto-update.log", "auto-update.lock"]) writeFileSync(join(home, ".config", "xo", f), "x");
+  sh(XO.remove[1].cmd);
+  assert.deepEqual(readdirSync(join(home, ".config", "xo")), []);
+  for (const st of [...Object.values(AUTO).flatMap((t) => Object.values(t)), QQ_AT_PIN]) assert.doesNotMatch(st.cmd, /[#!]/, st.what);
+
+  // Which steps: tools at setup's commits (detect's latest is qq's pin).
+  const at = { qq: { ...none.qq, installed: true, onPath: true, commit: "p".repeat(40), latest: "p".repeat(40), syncPin: SYNC_PIN },
+    xo: { ...none.xo, installed: true, onPath: true, pin: XO_PIN } };
+  const on = (/** @type {any} */ st) => ({ qq: { ...st.qq, auto: true }, xo: { ...st.xo, auto: true } });
+  const keep = { qq: "keep", xo: "keep" };
+  const go = (/** @type {any} */ a, /** @type {any} */ st, /** @type {boolean | null} */ auto) => planSteps(a, st, { ...linux, auto }).steps;
+  assert.deepEqual(go(keep, at, null), [], "off unless turned on");
+  assert.deepEqual(go(keep, at, true), [AUTO.qq.on, AUTO.xo.on]);
+  assert.deepEqual(go(keep, on(at), true), [], "already on");
+  assert.deepEqual(go(keep, on(at), false), [AUTO.qq.off, AUTO.xo.off]);
+  assert.deepEqual(go(keep, at, false), [], "nothing to delete");
+  // An update while it is on names the new commit again; so does a fresh install of the other tool.
+  assert.deepEqual(go({ qq: "update", xo: "keep" }, on(at), null), [...QQ_STEPS, AUTO.qq.on]);
+  assert.deepEqual(go({ qq: "keep", xo: "install" }, { ...at, qq: { ...at.qq, auto: true }, xo: none.xo }, null), [XO.install, XO.path, AUTO.xo.on]);
+  assert.deepEqual(go({ qq: "update", xo: "keep" }, at, null), QQ_STEPS);
+  // A removed tool's marker goes with it; a kept one not at setup's commit is left off, and the page says so.
+  assert.deepEqual(go({ qq: "keep", xo: "remove" }, at, true), [...XO.remove, AUTO.qq.on]);
+  const handXo = { ...at, xo: { ...at.xo, pin: "1".repeat(40) } };
+  assert.deepEqual(go(keep, handXo, true), [AUTO.qq.on]);
+  assert.deepEqual(autoNotes(keep, handXo, true), ["Auto-update stays off for xo: it is not at setup's commit. Update it here to turn it on."]);
+  assert.deepEqual(autoNotes({ qq: "keep", xo: "update" }, handXo, true), []);
+  // Windows: xo's marker, by PowerShell, in xo's Windows config folder.
+  const win = planSteps({ qq: "keep", xo: "update" }, { ...at, qq: { ...at.qq, unsupported: true } }, { python: py, platform: "win32", git: true, auto: true }).steps;
+  assert.deepEqual(win, [XO_WIN.update, AUTO.xoWin.on]);
+  assert.ok(AUTO.xoWin.on.cmd.includes(`[IO.File]::WriteAllText($p, '${XO_PIN}' + [char]10)`));
+
+  // The terminal: flags, and one question.
+  const fh = fakeHome();
+  writeFileSync(join(fh, ".zshrc"), `export PATH="$HOME/qq-tools/bin:$PATH"\n${XO_PATH_LINE}\n`);
+  assert.equal((await drive(["--auto-update", "--no-auto-update"], { home: fh })).code, 2);
+  const flag = await drive(["--yes", "--auto-update"], { home: fh, tty: false });
+  assert.deepEqual(flag.steps, [AUTO.qq.on.cmd, AUTO.xo.on.cmd]);
+  const asked = await drive([], { home: fh, answers: ["", "", "y", "y"] });
+  assert.match(asked.asked[2], /^Turn on auto-update\? Before a command, qq and xo then update to setup's reviewed commit \(checked once a day\)\. \[y\/N\]/);
+  assert.deepEqual(asked.steps, [AUTO.qq.on.cmd, AUTO.xo.on.cmd]);
+  // Enter leaves it off.
+  assert.equal((await drive([], { home: fh, answers: ["", "", ""] })).out.at(-1), "\nNothing to do.");
+  // --only xo: qq's marker is left as it is.
+  assert.deepEqual((await drive(["--yes", "--only", "xo", "--auto-update"], { home: fh, tty: false })).steps, [AUTO.xo.on.cmd]);
 });

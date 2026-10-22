@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { cleanTmp, detect, planSteps, QQ_REMOVE, QQ_REMOVE_TOOLS, removeLineCmd, SYNC_PIN, XO, XO_PIN } from "../cli/install.mjs";
+import { AUTO, cleanTmp, detect, planSteps, QQ_REMOVE, QQ_REMOVE_TOOLS, removeLineCmd, SYNC_PIN, XO, XO_PIN } from "../cli/install.mjs";
 import { checkChoice, machine, pipedStep } from "../cli/machine.mjs";
 
 /** qq and xo installed, both on PATH, as their installs leave them. */
@@ -80,7 +80,9 @@ test("checkChoice: only offered actions, known fields, and extras only with qq's
   assert.equal(checkChoice({ qq: "keep", python: true }, state, []).ok, false, "the QQ_PYTHON line only with remove");
   assert.equal(checkChoice({ qq: "remove", python: "yes" }, state, []).ok, false);
   assert.equal(checkChoice([], state, []).ok, false);
-  assert.deepEqual(checkChoice({}, state, []), { ok: true, choice: { qq: "keep", xo: "keep", demo: [], python: false } });
+  assert.deepEqual(checkChoice({}, state, []), { ok: true, choice: { qq: "keep", xo: "keep", demo: [], python: false, auto: null } });
+  assert.equal(checkChoice({ auto: true }, state, []).ok, true);
+  assert.equal(checkChoice({ auto: "on" }, state, []).ok, false, "auto: true, false or null only");
   // A ~/.xo that is not xo's offers nothing but keep.
   const foreign = /** @type {any} */ ({ ...state, xo: { ...state.xo, foreign: true } });
   assert.equal(checkChoice({ xo: "remove" }, foreign, []).ok, false);
@@ -296,4 +298,18 @@ test("a plan still working out its steps when a run starts is not kept", async (
   assert.match(s.error, /a run is going/);
   finish();
   await finished(m);
+});
+
+test("auto-update: the panel shows the option and plans its marker steps", async () => {
+  const { m, h, plan } = setup();
+  assert.equal((await m.state()).auto, false);
+  const p = await plan({ auto: true });
+  assert.deepEqual(p.steps, [AUTO.qq.on, AUTO.xo.on]);
+  assert.deepEqual((await plan({ auto: null })).steps, []);
+  mkdirSync(join(h, ".config", "xo"), { recursive: true });
+  writeFileSync(join(h, ".config", "xo", "auto-update"), `${XO_PIN}\n`);
+  const s = await m.state();
+  assert.equal(s.auto, true);
+  assert.match(s.xo.line, /; auto-update on/);
+  assert.deepEqual((await plan({ auto: false })).steps, [AUTO.xo.off]);
 });
