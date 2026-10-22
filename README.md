@@ -78,8 +78,8 @@ request from the form for 30 minutes), 2 error. Ctrl-C stops it by signal, which
 npx --allow-remote=root https://codeload.github.com/quirq-ai/setup/tar.gz/<commit> install
 ```
 
-It looks at what is already on this machine and says so: qq's commit in `~/qq-tools/depot` and the newest
-one on GitHub, qqsync's commit, xo's commit in `~/.xo`, and whether each is on your `PATH`. Then it asks,
+It looks at what is already on this machine and says so: qq's commit in `~/qq-tools/depot` and setup's
+pin for it, qqsync's commit, xo's commit in `~/.xo`, and whether each is on your `PATH`. Then it asks,
 for each tool: install it if it is missing (or reinstall it if it is there but broken); update, remove or
 keep it if it is there. It prints the exact commands, runs them after you say yes, and stops at the first
 one that fails (each is safe to run again). It never writes to GitHub and needs no `gh` login. It changes
@@ -94,8 +94,9 @@ in the registry, read and written as it is stored, so other entries keep their `
 (`setx` is not used: it cuts PATH at 1024 characters). Open a new terminal afterwards. Removing
 deletes the venv and that entry. CI runs the install and remove for real on a Windows runner.
 
-- **qq** (with qqsync) installs with the [qq guide](https://docs.quirq.dev/docs/install)'s three commands.
-  Updating reruns them, which deletes and re-clones `~/qq-tools/depot`, so qq is kept when the checkout
+- **qq** (with qqsync) installs with the [qq guide](https://docs.quirq.dev/docs/install)'s three commands,
+  plus one step after the clone that the guide does not have: it moves the checkout back from qq's newest
+  commit to setup's pin (`git reset --keep`). Updating reruns them, which deletes and re-clones `~/qq-tools/depot`, so qq is kept when the checkout
   has local work, unless you choose otherwise; `--yes` always keeps it. Local work is what git can
   show: files `git status` lists (changed, staged or untracked, but not ones git is told to ignore), commits
   no remote branch has (on any branch or tag, on a detached HEAD, or only in a reflog, as after a
@@ -106,7 +107,7 @@ deletes the venv and that entry. CI runs the install and remove for real on a Wi
   and `--yes` keeps them. It asks too before deleting an `export QQ_PYTHON=python3.N` line (something
   else may use that Python; `--yes` keeps it), and it leaves one written another way, or a `PATH`
   line written another way, and says so.
-- **Pins.** The commits setup installs (xo, and qqsync for qq) live in one file,
+- **Pins.** The commits setup installs (xo, qq and qqsync) live in one file,
   [`pins.json`](pins.json) (`qq-setup-pins/1`), and move only in a reviewed setup PR. qqsync's commit is
   also in the qq guide's command in `cli/tools.mjs`; a test keeps the two equal.
 - **xo** installs at the commit the [xo quickstart](https://github.com/quirq-ai/xo/blob/main/docs/quickstart.md)
@@ -118,6 +119,15 @@ deletes the venv and that entry. CI runs the install and remove for real on a Wi
   gh out), or, when xo cannot run, deletes that key itself, then `~/.xo` and its `PATH` line. After an
   install, run `xo login`: it signs you in to XO in your browser when the xo server offers that, and
   otherwise asks for your XO API key.
+- **Auto-update** is off unless you turn it on: one question in the terminal (Enter leaves it as it
+  is), `--auto-update` or `--no-auto-update`, or the checkbox in the form's This machine panel. On, it
+  writes a marker each tool reads before a command: `~/qq-tools/auto-update` (qq's and qqsync's commits)
+  and `auto-update` next to xo's key (`~/.config/xo`, or `$XDG_CONFIG_HOME/xo`), holding the commit setup
+  installed. Then qq and xo check `pins.json` on setup's main at most once a day in the background, and
+  when it names a newer commit they update to it before the next command (xo on Windows, where a running
+  `xo.exe` cannot be replaced, right after it). A tool installed some other way, or at another commit, is
+  left alone until you update it here. While it is on, an install or update here writes the marker again
+  with the new commit; off deletes the markers, and removing a tool deletes its auto-update files.
 - **Python.** qq needs 3.11.4 or newer and xo 3.11: `QQ_PYTHON` if set, else `python3`, else the newest
   `python3.N` it finds. For qq, that name is then written to your startup file as `QQ_PYTHON`, so qq
   finds it later. On a Mac with none, the first step is `brew install python@3.13`, then (for qq)

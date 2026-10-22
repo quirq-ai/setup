@@ -40,11 +40,14 @@ export type Machine = {
   // The signature of this look: a plan is made only while the machine still matches it.
   seen: string;
   demo: string[];
+  // Auto-update is on (either tool's marker is there).
+  auto: boolean;
   // note: on Windows, why qq is not offered (cli/windows.mjs).
   qq: MachineTool & { localWork: string | null; pythonLine: { line: string; files: string[] } | null; note: string | null };
   xo: MachineTool & { foreign: boolean; note: string | null };
 };
-export type Choice = { qq: Action; xo: Action; demo: string[]; python: boolean };
+// auto: turn auto-update on (true) or off (false); null leaves it as it is.
+export type Choice = { qq: Action; xo: Action; demo: string[]; python: boolean; auto: boolean | null };
 export type Step = { what: string; cmd: string };
 export type Plan = { ok: true; id: string | null; steps: Step[]; stop: string | null; notes: string[] };
 export type StepStatus = { what: string; status: "pending" | "running" | "ok" | "failed"; code?: number };

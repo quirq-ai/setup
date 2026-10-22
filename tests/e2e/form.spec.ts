@@ -1,5 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -459,10 +459,10 @@ for (const scheme of ["light", "dark"] as const) {
         await page.evaluate(() => window.scrollTo(0, 0)); // the sticky steps bar sits at the top of a full-page shot
         await page.screenshot({ path: join(SHOTS, `machine-${width}-${scheme}.png`), fullPage: true });
 
-        await page.getByRole("button", { name: "Run these 3 steps" }).click();
+        await page.getByRole("button", { name: "Run these 4 steps" }).click();
         await expect(page.getByRole("heading", { name: "Done" })).toBeVisible();
         await expect(page.getByLabel("Output")).toContainText("fake xo: logged out");
-        await expect(page.getByText("(done)")).toHaveCount(3);
+        await expect(page.getByText("(done)")).toHaveCount(4);
         expect(existsSync(join(home, ".xo"))).toBe(false);
         expect(existsSync(join(home, ".zshrc"))).toBe(false); // it held only xo's line
         // A fresh look: xo is now not installed, and the choice is back to Don't install.
@@ -483,6 +483,36 @@ for (const scheme of ["light", "dark"] as const) {
   }
 }
 
+for (const scheme of ["light", "dark"] as const) {
+  test(`this machine 390px ${scheme}: auto-update is off until ticked, and ticking it writes xo's marker`, async ({ browser }) => {
+    const home = homeWithXo();
+    const cli = await startCli({ HOME: home, SHELL: "/bin/zsh", XDG_CONFIG_HOME: "" });
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 }, colorScheme: scheme });
+    try {
+      await page.goto(cli.url);
+      const box = page.getByRole("checkbox", { name: "Keep qq and xo up to date automatically" });
+      await expect(box).not.toBeChecked();
+      await expect(page.getByText("Nothing to do with these choices.")).toBeVisible();
+      await box.check();
+      await expect(page.getByText("1. Turn on auto-update for xo", { exact: false })).toBeVisible();
+      await page.getByRole("button", { name: "Run this step" }).scrollIntoViewIfNeeded();
+      mkdirSync(SHOTS, { recursive: true });
+      await page.screenshot({ path: join(SHOTS, `auto-update-390-${scheme}.png`) });
+      await page.getByRole("button", { name: "Run this step" }).click();
+      await expect(page.getByRole("heading", { name: "Done" })).toBeVisible();
+      expect(readFileSync(join(home, ".config", "xo", "auto-update"), "utf8")).toBe(`${XO_PIN}\n`);
+      // The fresh look shows it on; unticking plans its delete.
+      await expect(page.getByText(/; auto-update on: up to date/)).toBeVisible();
+      await expect(box).toBeChecked();
+      await box.uncheck();
+      await expect(page.getByText("1. Turn off auto-update for xo", { exact: false })).toBeVisible();
+    } finally {
+      cli.proc.kill();
+      await page.close();
+    }
+  });
+}
+
 test("this machine: a plan made before the machine changed is refused, and the page looks again", async ({ browser }) => {
   const home = homeWithXo();
   const cli = await startCli({ HOME: home, SHELL: "/bin/zsh" });
@@ -490,10 +520,10 @@ test("this machine: a plan made before the machine changed is refused, and the p
   try {
     await page.goto(cli.url);
     await page.getByRole("radiogroup", { name: "What to do with xo" }).getByRole("radio", { name: "Remove" }).check();
-    await expect(page.getByRole("button", { name: "Run these 3 steps" })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "Run these 4 steps" })).toBeEnabled();
     // xo goes away behind the page's back: the plan it shows no longer fits.
     rmSync(join(home, ".xo"), { recursive: true });
-    await page.getByRole("button", { name: "Run these 3 steps" }).click();
+    await page.getByRole("button", { name: "Run these 4 steps" }).click();
     await expect(page.getByText(/something changed on this machine since the plan was made/)).toBeVisible();
     await expect(page.getByRole("radiogroup", { name: "What to do with xo" }).getByRole("radio", { name: "Don't install" })).toBeChecked();
     expect(cli.output()).not.toContain("Running the steps picked in the form:");
@@ -802,7 +832,7 @@ test("this machine: local work made after the page looked is never deleted unwar
   try {
     await page.goto(cli.url);
     const qq = page.getByRole("radiogroup", { name: "What to do with qq" });
-    await expect(page.getByText(/installed at [0-9a-f]{7} \(the newest\).*up to date/)).toBeVisible();
+    await expect(page.getByText(/installed at [0-9a-f]{7}, setup's pin is [0-9a-f]{7}.*update available/)).toBeVisible();
     await expect(qq.getByRole("radio", { name: "Keep" })).toBeChecked();
     // Work made after the page looked: picking Update gets no plan, and the page looks again.
     writeFileSync(join(depot, "MY-NOTES.txt"), "mine");
@@ -834,7 +864,7 @@ test("this machine: while a choice's steps are on their way, the steps of the la
     await page.goto(cli.url);
     const qq = page.getByRole("radiogroup", { name: "What to do with qq" });
     await qq.getByRole("radio", { name: "Update" }).click();
-    await expect(page.getByRole("button", { name: "Run these 3 steps" })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "Run these 4 steps" })).toBeEnabled();
     // Hold the next plan: until it arrives, Update's steps must not stay on screen under Remove.
     /** @type {() => void} */
     let release = () => {};
