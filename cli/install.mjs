@@ -49,7 +49,7 @@ export const PINS = (() => {
   return pins;
 })();
 
-/** The commit of xo the xo quickstart installs (quirq-ai/xo docs/quickstart.md:18, at 398c0e7). */
+/** The commit of xo the xo quickstart installs (quirq-ai/xo docs/quickstart.md:18, at 593cda7). */
 export const XO_PIN = PINS.xo;
 export const XO_SPEC = `quirq-xo @ git+https://github.com/quirq-ai/xo@${XO_PIN}`;
 export const XO_PATH_LINE = 'export PATH="$HOME/.xo/bin:$PATH"';
