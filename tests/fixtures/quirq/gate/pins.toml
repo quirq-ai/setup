@@ -1,0 +1,9 @@
+# Other qq repos this one reads, by pinned commit.
+
+[infra-config]
+source = "https://github.com/quirq-ai/infra-config"
+commit = "@INFRA_CONFIG@"   # the fixture's first commit
+
+[sync]
+source = "https://github.com/quirq-ai/sync"
+commit = "a1cc782991a5cb7b8e3f506e269883be31a9ae6e"

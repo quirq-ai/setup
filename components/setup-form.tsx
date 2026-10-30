@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { CircleCheck, TriangleAlert } from "lucide-react";
 import { AboutOrgSetup, AboutTogether } from "@/components/about";
 import { MachinePanel } from "@/components/machine-panel";
+import { PoliciesPanel } from "@/components/policies-panel";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -76,6 +77,7 @@ export function SetupForm() {
   const latestOrg = useRef("");
   const machineRef = useRef<HTMLElement>(null);
   const reposRef = useRef<HTMLElement>(null);
+  const policiesRef = useRef<HTMLElement>(null);
 
   const chooseOrg = useCallback(
     (login: string) => {
@@ -223,7 +225,9 @@ export function SetupForm() {
         <AboutTogether />
         {state?.readOnly && (
           <p className="text-sm text-muted-foreground">
-            It changes nothing on GitHub.
+            {state.policyOrg
+              ? "It changes nothing on GitHub except the quirq-ai pull requests you open in step 3."
+              : "It changes nothing on GitHub."}
             {" On this machine it runs only the steps you pick, after you press Run."}
           </p>
         )}
@@ -254,6 +258,11 @@ export function SetupForm() {
           <Button variant="outline" size="sm" onClick={() => go(reposRef)}>
             2. Your org&apos;s repos
           </Button>
+          {state.policyOrg && !state.github && (
+            <Button variant="outline" size="sm" onClick={() => go(policiesRef)}>
+              3. quirq-ai policies
+            </Button>
+          )}
         </nav>
       )}
 
@@ -473,6 +482,15 @@ export function SetupForm() {
             )}
             </>
           )}
+        </section>
+      )}
+
+      {state?.policyOrg && !state.github && (
+        <section ref={policiesRef} aria-labelledby="step-policies" className="flex scroll-mt-24 flex-col gap-6">
+          <h2 id="step-policies" className="font-display text-xl">
+            3. Repos and policies in quirq-ai
+          </h2>
+          <PoliciesPanel />
         </section>
       )}
     </div>

@@ -3,15 +3,20 @@
 // machine. The terminal checks your tools and a local form in your browser asks what to do: the form's
 // "This machine" panel runs the install, update or remove steps you pick (cli/machine.mjs), and the
 // terminal shows the plan for an org. `qq-setup install` does the same for this machine in the terminal.
-// IT NEVER WRITES TO GITHUB: it reads GitHub through your gh login. Only the machine steps change this
-// machine, in your home directory (and, on a Mac with no new enough Python, Homebrew's folder).
+// It reads GitHub through your gh login. Its only writes to GitHub are step 3's: for a member of
+// quirq-ai, a branch and a pull request in a quirq-ai repo each time they press Open on a reviewed
+// plan (cli/policy-write.mjs). Only the machine steps change this machine, in your home directory
+// (and, on a Mac with no new enough Python, Homebrew's folder).
 
 import { readFile } from "node:fs/promises";
 import { dirname, join, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { listOrgs, listRepos } from "./facts.mjs";
-import { getJson, GhError, isName } from "./gh.mjs";
+import { getJson, GhError, ghWrite, isName } from "./gh.mjs";
 import { buildPlan, checkAnswers, CONFIG_REPO } from "./plan.mjs";
+import { POLICY_ORG, readPolicies } from "./policies.mjs";
+import { gitBase, policyWriter } from "./policy-write.mjs";
+import { qqPython } from "./tools.mjs";
 import { preflight } from "./preflight.mjs";
 import { protectionWarnings, readProtection } from "./protection.mjs";
 import { openerBase, openFile, writeOpener } from "./opener.mjs";
@@ -34,7 +39,10 @@ Checks your tools and gh login, then opens a one-page form on 127.0.0.1 in two s
   1. this machine: install, update or remove qq and xo. The form shows what is installed and the
      exact commands for what you pick, and runs them when you press Run;
   2. set up repos in an org you own: pick the org and repos, and the plan prints here.
-The form changes nothing on GitHub. Without a gh login it still opens, for this machine only.
+For your org the form changes nothing on GitHub. For a member of quirq-ai, a third step lists its
+repos' pipelines and policies and opens pull requests to add, change or remove one, each only when
+you press Open on its reviewed diff; it merges and applies nothing.
+Without a gh login it still opens, for this machine only.
 
   install        install, update or remove qq and xo in this terminal instead: it shows what is
                  installed, asks, prints the commands and runs them after a yes (install --help)
@@ -70,7 +78,7 @@ async function main(argv = process.argv.slice(2)) {
   if (argv.includes("--version")) return console.log(`qq-setup ${pkg.version}`), 0;
 
   console.log(`${bold("qq-setup")} ${pkg.version}: sets up quirq infra (qq) for a GitHub org, or installs qq and xo on this machine.`);
-  console.log("It only reads from GitHub: nothing there is created or changed.\n");
+  console.log("It reads from GitHub. The only thing it creates there is a pull request in quirq-ai, from step 3, when you press Open.\n");
 
   const results = await preflight();
   // Without these the form cannot open at all; the other failures only rule out the GitHub parts.
@@ -99,6 +107,20 @@ async function main(argv = process.argv.slice(2)) {
     console.log("        create a free org at https://github.com/account/organizations/new, move your repos into it");
     console.log("        (each repo's Settings > General > Transfer ownership), then run this again.");
   }
+
+  /** Whether the login is in the org whose repos step 3 shows. Its writes are pull requests, which GitHub checks. */
+  const policyOrg = orgs.some((o) => o.login.toLowerCase() === POLICY_ORG);
+  const writer = policyOrg && process.platform !== "win32"
+    ? policyWriter({ getJson, ghWrite, python: qqPython(process.env), base: gitBase() })
+    : null;
+  if (writer && process.env.QQ_SETUP_GIT_BASE) console.log(`  note  step 3 clones quirq-ai's repos from ${gitBase()} (QQ_SETUP_GIT_BASE)`);
+  /** @param {unknown} body @param {"plan" | "open"} what */
+  const write = async (body, what) => {
+    touch();
+    if (!policyOrg) return { ok: false, status: 403, error: `only members of ${POLICY_ORG} can change its repo policies here` };
+    if (!writer) return { ok: false, status: 409, error: "changing policies runs gate's and infra-config's tools, which need macOS or Linux" };
+    return writer[what](body);
+  };
 
   /** @type {Map<string, import("./facts.mjs").Repo[]>} */
   const listed = new Map();
@@ -147,7 +169,16 @@ async function main(argv = process.argv.slice(2)) {
       else if (Number.isInteger(Math.log10(refused))) console.log(`The link has now been tried again ${refused} times; all refused.`);
     },
     handlers: {
-      state: async () => (touch(), { version: pkg.version, readOnly: true, login, orgs, github, platform: process.platform }),
+      state: async () => (touch(), { version: pkg.version, readOnly: true, login, orgs, github, platform: process.platform, policyOrg }),
+      // Step 3: quirq-ai's repos and their policies. Offered to members of that org.
+      policies: async () => {
+        touch();
+        if (!policyOrg) return { ok: false, error: `only members of ${POLICY_ORG} can look at its repo policies here` };
+        return readPolicies();
+      },
+      // Step 3's writes: a plan (diffs, nothing written), then one pull request per press of Open.
+      policyPlan: (body) => write(body, "plan"),
+      policyOpen: (body) => write(body, "open"),
       repos: async (org) => {
         touch();
         const o = orgs.find((x) => x.login === org);
