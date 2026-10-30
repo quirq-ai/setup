@@ -99,7 +99,8 @@ test("checkRequest takes only what each op needs", () => {
     [{ op: "edit", repo: "web", fields: { approvals: 11 } }, /0 to 10/],
     [{ op: "edit", repo: "web", fields: { admin: true } }, /unknown field admin/],
     [{ op: "add", repo: "x", fields: { approvals: 1, autoMerge: true } }, /at least one kind/],
-    [{ op: "add", repo: "x", fields: { approvals: 1 }, kinds: ["node-app"] }, /approvals and auto-merge/],
+    [{ op: "add", repo: "x", fields: { approvals: 1 }, kinds: ["node-app"], description: "x" }, /approvals and auto-merge/],
+    [{ op: "add", repo: "x", fields: { approvals: 1, autoMerge: true }, kinds: ["node-app"], description: " " }, /one-line description/],
     [{ op: "add", repo: "x", fields: { approvals: 1, autoMerge: true }, kinds: ["node-app"], description: "two\nlines" }, /one line/],
     [{ op: "remove", repo: "web", fields: { approvals: 1 } }, /only the repo/],
     [{ op: "remove", repo: "web", branch: "main" }, /unknown field branch/],
@@ -128,21 +129,27 @@ test("the tools' environment has no token and an empty home", () => {
 });
 
 /** A writer over local stand-in repos, with GitHub's reads and writes recorded. */
-function writer(base, { heads = {}, prs = [] } = /** @type {{ heads?: Record<string, string>, prs?: any[] }} */ ({})) {
+function writer(base, { heads = {}, prs = [], branch = null, now = () => new Date() } =
+  /** @type {{ heads?: Record<string, string>, prs?: any[], branch?: any, now?: () => Date }} */ ({})) {
   /** @type {string[]} */
   const log = [];
   /** @type {any[]} */
   const writes = [];
   const w = policyWriter({
-    base, python: FAKE_PYTHON,
+    base, python: FAKE_PYTHON, now,
     getJson: async (path) => {
       log.push(path);
       if (path.endsWith("/pulls?state=open&per_page=100")) return prs;
       if (path === "repos/quirq-ai/web") return { default_branch: "main", private: false };
       if (path === "repos/quirq-ai/secret") return { default_branch: "main", private: true };
+      if (path === "repos/quirq-ai/old") return { default_branch: "master", private: false };
       const head = /^repos\/quirq-ai\/([^/]+)\/git\/ref\/heads\/main$/.exec(path);
       if (head) return { object: { sha: heads[head[1]] } };
-      if (path.includes("/git/ref/heads/qq-setup/")) throw new GhError("Not Found", 404);
+      if (path.includes("/git/ref/heads/qq-setup/")) {
+        if (branch) return { object: { sha: "made1" } };
+        throw new GhError("Not Found", 404);
+      }
+      if (path.endsWith("/git/commits/made1")) return branch;
       if (path.includes("/git/commits/")) return { tree: { sha: "tree0" } };
       if (path === "repos/quirq-ai/web/rulesets?per_page=100") return [{ id: 11, name: "qq-main" }, { id: 12, name: "release-freeze" }];
       throw new GhError("Not Found", 404);
@@ -236,7 +243,7 @@ test("add a new product: the gate step moves the pin once infra-config lists it"
   const base = makeRemotes();
   // newapp is a repo with a first commit; the fake GitHub answers for it.
   cpSync(join(base, "web"), join(base, "newapp"), { recursive: true });
-  const add = { op: "add", repo: "newapp", fields: { approvals: 1, autoMerge: true }, kinds: ["node-app"], description: "" };
+  const add = { op: "add", repo: "newapp", fields: { approvals: 1, autoMerge: true }, kinds: ["node-app"], description: "A new app" };
   const w2 = policyWriter({ base, python: FAKE_PYTHON, getJson: async (p) => {
     if (p === "repos/quirq-ai/newapp") return { default_branch: "main" };
     if (p.endsWith("/pulls?state=open&per_page=100")) return [];
@@ -287,6 +294,51 @@ test("a tool's refusal is shown on its step, and nothing is opened", async () =>
     const plan = /** @type {any} */ (await w.plan({ op: "remove", repo: "web" }));
     assert.deepEqual([plan.steps[0].state, plan.steps[0].detail], ["refused", "python failed: qqcfg remove-repo: web is named in another area"]);
     assert.deepEqual(await w.open({ id: plan.id, step: "infra-config" }), { ok: false, error: "that step has nothing to open" });
+  } finally {
+    await w.close();
+  }
+});
+
+test("open picks up a branch an earlier Open made, and refuses an old plan or someone else's branch", async () => {
+  const base = makeRemotes();
+  const gate = head(base, "gate");
+  const edit = { op: "edit", repo: "web", fields: { approvals: 3 } };
+  const resumed = writer(base, { heads: { gate }, branch: { parents: [{ sha: gate }], message: "web: change merge rules (qq-setup)" } });
+  try {
+    const plan = /** @type {any} */ (await resumed.w.plan(edit));
+    assert.deepEqual(await resumed.w.open({ id: plan.id, step: "gate" }), { ok: true, url: "https://github.com/quirq-ai/gate/pull/9" });
+    assert.deepEqual(resumed.writes.map((x) => x.path), ["repos/quirq-ai/gate/pulls"], "only the pull request: the branch is there");
+  } finally {
+    await resumed.w.close();
+  }
+  const other = writer(base, { heads: { gate }, branch: { parents: [{ sha: "e".repeat(40) }], message: "something else" } });
+  try {
+    const plan = /** @type {any} */ (await other.w.plan(edit));
+    assert.match(/** @type {any} */ (await other.w.open({ id: plan.id, step: "gate" })).error, /already has a branch qq-setup\/edit-web-[0-9a-f]{7} with no open pull request/);
+    assert.equal(other.writes.length, 0);
+  } finally {
+    await other.w.close();
+  }
+  let t = Date.parse("2026-10-30T12:00:00Z");
+  const late = writer(base, { heads: { gate }, now: () => new Date(t) });
+  try {
+    const plan = /** @type {any} */ (await late.w.plan(edit));
+    t += 31 * 60 * 1000;
+    assert.deepEqual(await late.w.open({ id: plan.id, step: "gate" }), { ok: false, error: "that plan is gone (they last 30 minutes): plan again" });
+    assert.equal(late.writes.length, 0);
+  } finally {
+    await late.w.close();
+  }
+});
+
+test("a pull request for another repo whose name starts the same is not this one's", async () => {
+  const base = makeRemotes();
+  const { w } = writer(base, { prs: [{ head: { ref: "qq-setup/edit-web-app-1234567", repo: { full_name: "quirq-ai/gate" } }, html_url: "https://github.com/quirq-ai/gate/pull/5" }] });
+  try {
+    const plan = /** @type {any} */ (await w.plan({ op: "edit", repo: "web", fields: { approvals: 2 } }));
+    assert.equal(plan.steps[0].state, "ready");
+    assert.match(/** @type {any} */ (await w.plan({ op: "add", repo: "old", fields: { approvals: 1, autoMerge: true }, kinds: ["node-app"], description: "Old" })).error,
+      /old's default branch is master: qq-setup adds repos whose default branch is main/);
   } finally {
     await w.close();
   }

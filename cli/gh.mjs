@@ -53,7 +53,11 @@ export function gh(args, opts = {}) {
         resolve(String(stdout));
       },
     );
-    if (opts.input !== undefined) child.stdin?.end(opts.input);
+    if (opts.input !== undefined) {
+      // gh may exit before reading its input; the exit is reported above, so a broken pipe is not.
+      child.stdin?.on("error", () => {});
+      child.stdin?.end(opts.input);
+    }
   });
 }
 

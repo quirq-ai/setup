@@ -121,12 +121,16 @@ export function checkRequest(body) {
   }
   if (b.op === "add") {
     if (!kinds.length) throw new WriteError("pick at least one kind");
+    if (!description.trim()) throw new WriteError("a new repo needs a one-line description (infra-config lists it)");
     if (fields.approvals === undefined || fields.autoMerge === undefined) throw new WriteError("a new repo needs its approvals and auto-merge");
   } else if (kinds.length || description) throw new WriteError(`kinds and a description go with add, not ${b.op}`);
   if (b.op === "edit" && !Object.keys(fields).length) throw new WriteError("nothing to change");
   if (b.op === "remove" && Object.keys(fields).length) throw new WriteError("remove takes only the repo");
   return { op: b.op, repo: b.repo, fields, kinds: /** @type {string[]} */ (kinds), description };
 }
+
+/** How long a plan can be opened: after that the page plans again, from what is on GitHub then. */
+const PLAN_MS = 30 * 60 * 1000;
 
 /** The command an org admin runs once gate's pull request is merged (gate docs/apply-settings.md). @param {string} sha */
 export const applyCommand = (sha) =>
@@ -178,18 +182,19 @@ export function policyWriter(deps) {
   }
 
   /**
-   * A fresh shallow clone of one ref (a branch or a commit).
-   * @param {string} repo @param {string} ref
+   * A fresh shallow clone of one ref (a branch or a commit), from quirq-ai or from an earlier clone
+   * (a folder), which saves fetching the same commit twice.
+   * @param {string} repo @param {string} ref @param {string} [from]
    * @returns {Promise<{ dir: string, sha: string }>}
    */
-  async function clone(repo, ref) {
+  async function clone(repo, ref, from) {
     const r = await run();
     const dir = join(await scratch(), `${repo}-${++n}`);
     const git = (/** @type {string[]} */ ...a) => r("git", ["-c", "credential.helper=", "-c", "core.hooksPath=/dev/null",
       "-C", dir, ...a], { timeoutMs: 180_000 });
     await mkdir(dir);
     await git("init", "-q");
-    await git("fetch", "-q", "--depth", "1", "--no-tags", `${deps.base}/${repo}`, ref);
+    await git("fetch", "-q", "--depth", "1", "--no-tags", from ?? `${deps.base}/${repo}`, ref);
     await git("checkout", "-q", "FETCH_HEAD");
     return { dir, sha: (await git("rev-parse", "HEAD")).trim() };
   }
@@ -248,15 +253,16 @@ export function policyWriter(deps) {
   }
 
   /**
-   * Open pull requests on a repo whose branch starts with prefix.
-   * @param {string} repo @param {string} prefix
-   * @returns {Promise<string | null>} the newest one's link
+   * The newest open pull request from a branch qq-setup made for this op and repo
+   * (`qq-setup/<op>-<repo>-<commit>`), so a re-run picks up where the last one stopped.
+   * @param {string} repo  where to look @param {string} prefix  `qq-setup/<op>-<target>-`
+   * @returns {Promise<string | null>} its link
    */
   async function openPr(repo, prefix) {
     const prs = await deps.getJson(`repos/${POLICY_ORG}/${repo}/pulls?state=open&per_page=100`);
     if (!Array.isArray(prs)) throw new WriteError(`unexpected answer listing ${repo}'s pull requests`);
     const mine = prs.filter((p) => typeof p?.head?.ref === "string" && p.head.ref.startsWith(prefix) &&
-      p.head?.repo?.full_name === `${POLICY_ORG}/${repo}`);
+      /^[0-9a-f]{7}$/.test(p.head.ref.slice(prefix.length)) && p.head?.repo?.full_name === `${POLICY_ORG}/${repo}`);
     return mine.length ? String(mine[0].html_url) : null;
   }
 
@@ -271,7 +277,10 @@ export function policyWriter(deps) {
   async function prStep(s, ready) {
     const prefix = `qq-setup/${s.op}-${s.target}-`;
     const url = await openPr(s.repo, prefix);
-    if (url) return { key: s.key, repo: s.repo, title: s.title, state: "open", url, detail: "A pull request from this change is open: review and merge it there." };
+    if (url) {
+      return { key: s.key, repo: s.repo, title: s.title, state: "open", url,
+        detail: `A qq-setup pull request to ${s.op} ${s.target} is open here: review and merge it, or close it on GitHub before planning a different change.` };
+    }
     let made;
     try {
       made = await s.make();
@@ -313,25 +322,24 @@ export function policyWriter(deps) {
 
     /** gate's pull request for an add or remove: settings, the pin moved to infra-config main, the golden plan. */
     const gateAt = (/** @type {(t: string) => string} */ edit, /** @type {string} */ why) => async () => {
-      const g = await clone("gate", gate.sha);
-      const ic2 = await clone("infra-config", ic.sha);
+      const g = await clone("gate", gate.sha, gate.dir);
       const sp = join(g.dir, "settings", "github.toml");
       await writeFile(sp, edit(await readFile(sp, "utf8")));
       const pp = join(g.dir, "pins.toml");
       await writeFile(pp, repin(await readFile(pp, "utf8"), ic.sha, why));
-      await golden(g.dir, ic2.dir);
+      await golden(g.dir, ic.dir);
       return { dir: g.dir, sha: g.sha, notes: pinned === ic.sha ? [] : [`Moves gate's infra-config pin from ${short(pinned)} to ${short(ic.sha)} (infra-config main), which also brings in every other infra-config change merged in between; the golden plan shows what that changes.`] };
     };
 
     if (op === "edit") {
       if (!gated) throw new WriteError(`${repo} is not behind the gate: add it instead`);
-      const icPin = await clone("infra-config", pinned);
       steps.push(await prStep({ key: "gate", repo: "gate", title: `gate: change ${repo}'s merge rules`, op, target: repo, baseBranch: "main",
         done: `gate's settings already have these values for ${repo}.`,
         prTitle: `${repo}: change merge rules (qq-setup)`,
         prBody: `Changes ${repo}'s \`[[repo]]\` in settings/github.toml and regenerates the golden plan against infra-config at the current pin (${short(pinned)}).\n\nOnce merged, an org admin applies it with gate's scripts/apply.sh (docs/apply-settings.md).\n\n${by}`,
         make: async () => {
-          const g = await clone("gate", gate.sha);
+          const g = await clone("gate", gate.sha, gate.dir);
+          const icPin = pinned === ic.sha ? ic : await clone("infra-config", pinned);
           const sp = join(g.dir, "settings", "github.toml");
           await writeFile(sp, editRepo(await readFile(sp, "utf8"), repo, req.fields));
           await golden(g.dir, icPin.dir);
@@ -346,6 +354,7 @@ export function policyWriter(deps) {
       });
       if (meta?.private) throw new WriteError(`${repo} is private: v0 adds public repos only (a merge queue on a private repo needs GitHub Enterprise Cloud)`);
       const defaultBranch = typeof meta?.default_branch === "string" ? meta.default_branch : "main";
+      if (defaultBranch !== "main") throw new WriteError(`${repo}'s default branch is ${defaultBranch}: qq-setup adds repos whose default branch is main (what infra-config records and gate's rulesets protect)`);
       const kindArgs = req.kinds.flatMap((k) => ["--kind", k]);
       steps.push(listed
         ? { key: "infra-config", repo: "infra-config", title: `infra-config: list ${repo} and its pipelines`, state: "done", detail: `infra-config's repos.toml lists ${repo}.` }
@@ -353,9 +362,9 @@ export function policyWriter(deps) {
           done: "", prTitle: `Add ${repo} as a product repo (qq-setup)`,
           prBody: `\`qqcfg add-repo ${repo} ${req.kinds.map((k) => `--kind ${k}`).join(" ")}\`: its \`[[repo]]\` in config/repos.toml, its presubmit and postsubmit builders in config/pipelines.toml, and what \`qqcfg generate\` writes from them. \`qqcfg validate\` passed.\n\nNext, once this merges: ${repo}'s workflows (\`qqcfg deliver\`) and gate's settings with a pin past this commit.\n\n${by}`,
           make: async () => {
-            const c = await clone("infra-config", ic.sha);
+            const c = await clone("infra-config", ic.sha, ic.dir);
             const py = await python(gate.dir);
-            await (await run())(py, [join(c.dir, "tools", "qqcfg.py"), "add-repo", repo, ...kindArgs, "--description", req.description, "--root", c.dir], { cwd: c.dir });
+            await (await run())(py, [join(c.dir, "tools", "qqcfg.py"), "add-repo", repo, ...kindArgs, `--description=${req.description}`, "--root", c.dir], { cwd: c.dir });
             return c;
           } }, ready));
       steps.push(!listed
@@ -397,7 +406,7 @@ export function policyWriter(deps) {
           done: "", prTitle: `Take ${repo} out of qq (qq-setup)`,
           prBody: `\`qqcfg remove-repo ${repo}\`: its \`[[repo]]\` and builders, and what \`qqcfg generate\` writes from them. \`qqcfg validate\` passed. The repo itself, its code and its delivered qq-*.yml files are not touched.\n\n${by}`,
           make: async () => {
-            const c = await clone("infra-config", ic.sha);
+            const c = await clone("infra-config", ic.sha, ic.dir);
             const py = await python(gate.dir);
             await (await run())(py, [join(c.dir, "tools", "qqcfg.py"), "remove-repo", repo, "--root", c.dir], { cwd: c.dir });
             return c;
@@ -457,11 +466,23 @@ export function policyWriter(deps) {
     const repo = r.step.repo;
     const head = await deps.getJson(`repos/${POLICY_ORG}/${repo}/git/ref/heads/${encodeRef(r.baseBranch).replace(/%2F/g, "/")}`);
     if (head?.object?.sha !== r.base) throw new WriteError(`${repo}'s ${r.baseBranch} moved since the plan: plan again`);
+    /** @type {string | null} */
+    let made = null;
     try {
-      await deps.getJson(`repos/${POLICY_ORG}/${repo}/git/ref/heads/${r.branch}`);
-      throw new WriteError(`${repo} already has a branch ${r.branch} with no open pull request: delete it on GitHub, then plan again`);
+      made = String((await deps.getJson(`repos/${POLICY_ORG}/${repo}/git/ref/heads/${r.branch}`))?.object?.sha);
     } catch (e) {
       if (!(e instanceof GhError && e.status === 404)) throw e;
+    }
+    if (made) {
+      // An earlier Open made the branch and stopped before its pull request: open that, if the
+      // branch is still the one commit on this base it made. Anything else is not ours to reuse.
+      const c = await deps.getJson(`repos/${POLICY_ORG}/${repo}/git/commits/${made}`);
+      const parents = Array.isArray(c?.parents) ? c.parents.map((/** @type {any} */ p) => p?.sha) : [];
+      if (parents.length !== 1 || parents[0] !== r.base || c?.message !== r.prTitle) {
+        throw new WriteError(`${repo} already has a branch ${r.branch} with no open pull request: delete it on GitHub, then plan again`);
+      }
+      const pr = await deps.ghWrite(`repos/${POLICY_ORG}/${repo}/pulls`, { title: r.prTitle, head: r.branch, base: r.baseBranch, body: r.prBody });
+      return String(pr.html_url);
     }
     const commit = await deps.getJson(`repos/${POLICY_ORG}/${repo}/git/commits/${r.base}`);
     const tree = await deps.ghWrite(`repos/${POLICY_ORG}/${repo}/git/trees`, {
@@ -470,8 +491,8 @@ export function policyWriter(deps) {
         ? { path: c.path, mode: c.mode, type: "blob", sha: null }
         : { path: c.path, mode: c.mode, type: "blob", content: c.content }),
     });
-    const made = await deps.ghWrite(`repos/${POLICY_ORG}/${repo}/git/commits`, { message: r.prTitle, tree: tree.sha, parents: [r.base] });
-    await deps.ghWrite(`repos/${POLICY_ORG}/${repo}/git/refs`, { ref: `refs/heads/${r.branch}`, sha: made.sha });
+    const created = await deps.ghWrite(`repos/${POLICY_ORG}/${repo}/git/commits`, { message: r.prTitle, tree: tree.sha, parents: [r.base] });
+    await deps.ghWrite(`repos/${POLICY_ORG}/${repo}/git/refs`, { ref: `refs/heads/${r.branch}`, sha: created.sha });
     const pr = await deps.ghWrite(`repos/${POLICY_ORG}/${repo}/pulls`, { title: r.prTitle, head: r.branch, base: r.baseBranch, body: r.prBody });
     return String(pr.html_url);
   }
@@ -500,14 +521,16 @@ export function policyWriter(deps) {
       const { steps, ready } = await makePlan(req);
       const id = randomBytes(12).toString("hex");
       const now = (deps.now ?? (() => new Date()))().getTime();
-      for (const [k, p] of plans) if (now - p.at > 30 * 60 * 1000) plans.delete(k);
+      for (const [k, p] of plans) if (now - p.at > PLAN_MS) plans.delete(k);
       plans.set(id, { at: now, ready, steps });
       return { ok: true, id, op: req.op, repo: req.repo, steps };
     }),
     /** @param {unknown} body */
     open: (body) => exclusive(async () => {
       const b = /** @type {Record<string, unknown>} */ (typeof body === "object" && body !== null ? body : {});
-      const p = typeof b.id === "string" ? plans.get(b.id) : undefined;
+      const now = (deps.now ?? (() => new Date()))().getTime();
+      const found = typeof b.id === "string" ? plans.get(b.id) : undefined;
+      const p = found && now - found.at <= PLAN_MS ? found : undefined;
       if (!p) throw new WriteError("that plan is gone (they last 30 minutes): plan again");
       const r = typeof b.step === "string" ? p.ready.get(b.step) : undefined;
       if (!r) throw new WriteError("that step has nothing to open");

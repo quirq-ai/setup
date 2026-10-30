@@ -41,7 +41,8 @@ const NAME = /^[A-Za-z0-9._-]{1,100}$/;
 export function PolicyChange({ data }: { data: Policies }) {
   const [op, setOp] = useState<Op>("add");
   const gated = data.repos.filter((r) => r.gated);
-  const removable = data.repos.filter((r) => r.kind !== "infra");
+  // Products, and repos infra-config lists as products that gate does not have yet.
+  const removable = data.repos.filter((r) => r.kind === "product" || (r.kind === "unlisted" && r.kinds.length > 0));
   const [repo, setRepo] = useState("");
   const [kinds, setKinds] = useState<string[]>([]);
   const [description, setDescription] = useState("");
@@ -80,12 +81,14 @@ export function PolicyChange({ data }: { data: Policies }) {
     if (!approvalsOk) return "Approvals must be a whole number from 0 to 10.";
     if (op === "add") {
       if (!kinds.length) return "Pick at least one kind: it decides the repo's pipelines.";
+      if (!description.trim()) return "Say in one line what the repo is: infra-config lists it.";
       return { op, repo, kinds, description, fields: { approvals: n, autoMerge, ...(codeOwnerReview ? { codeOwnerReview } : {}) } };
     }
     const m = current?.merge;
     const fields = {
       ...(m?.approvals !== n ? { approvals: n } : {}),
-      ...(m?.autoMerge !== autoMerge ? { autoMerge } : {}),
+      // Unset in gate (GitHub keeps the repo's own setting) reads as unchecked: sent only when ticked.
+      ...((m?.autoMerge ?? false) !== autoMerge ? { autoMerge } : {}),
       ...(m?.codeOwnerReview !== codeOwnerReview ? { codeOwnerReview } : {}),
     };
     if (!Object.keys(fields).length) return "Nothing to change: these are its values now.";
@@ -166,7 +169,7 @@ export function PolicyChange({ data }: { data: Policies }) {
               </div>
             </fieldset>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="policy-description">One line on what it is (optional)</Label>
+              <Label htmlFor="policy-description">One line on what it is</Label>
               <Input id="policy-description" value={description} maxLength={200} onChange={(e) => (setDescription(e.target.value), setPlan(null))} className="sm:max-w-xl" />
             </div>
           </>
@@ -189,6 +192,12 @@ export function PolicyChange({ data }: { data: Policies }) {
               <Checkbox checked={autoMerge} onCheckedChange={(on) => (setAutoMerge(on === true), setPlan(null))} />
               Allow auto-merge (a pull request lands by itself once its checks and approvals pass)
             </Label>
+            {op === "edit" && current?.merge && current.merge.autoMerge === null && (
+              <p className="text-sm text-muted-foreground">
+                gate does not set auto-merge for {current.name} now, so GitHub keeps the repo&apos;s own setting. Left
+                unticked, that stays so; ticked, gate turns it on.
+              </p>
+            )}
             <Label className="flex min-h-11 items-center gap-2 font-normal">
               <Checkbox checked={codeOwnerReview} onCheckedChange={(on) => (setCodeOwnerReview(on === true), setPlan(null))} />
               Approval must come from a code owner (CODEOWNERS)
