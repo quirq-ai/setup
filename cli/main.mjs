@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { listOrgs, listRepos } from "./facts.mjs";
 import { getJson, GhError, isName } from "./gh.mjs";
 import { buildPlan, checkAnswers, CONFIG_REPO } from "./plan.mjs";
+import { POLICY_ORG, readPolicies } from "./policies.mjs";
 import { preflight } from "./preflight.mjs";
 import { protectionWarnings, readProtection } from "./protection.mjs";
 import { openerBase, openFile, writeOpener } from "./opener.mjs";
@@ -100,6 +101,9 @@ async function main(argv = process.argv.slice(2)) {
     console.log("        (each repo's Settings > General > Transfer ownership), then run this again.");
   }
 
+  /** Whether the login is in the org whose repos step 3 shows (any role: it only reads). */
+  const policyOrg = orgs.some((o) => o.login.toLowerCase() === POLICY_ORG);
+
   /** @type {Map<string, import("./facts.mjs").Repo[]>} */
   const listed = new Map();
   /** @type {(v: import("./plan.mjs").Answers | { done: true }) => void} */
@@ -147,7 +151,13 @@ async function main(argv = process.argv.slice(2)) {
       else if (Number.isInteger(Math.log10(refused))) console.log(`The link has now been tried again ${refused} times; all refused.`);
     },
     handlers: {
-      state: async () => (touch(), { version: pkg.version, readOnly: true, login, orgs, github, platform: process.platform }),
+      state: async () => (touch(), { version: pkg.version, readOnly: true, login, orgs, github, platform: process.platform, policyOrg }),
+      // Step 3: quirq-ai's repos and their policies, read only. Offered to members of that org.
+      policies: async () => {
+        touch();
+        if (!policyOrg) return { ok: false, error: `only members of ${POLICY_ORG} can look at its repo policies here` };
+        return readPolicies();
+      },
       repos: async (org) => {
         touch();
         const o = orgs.find((x) => x.login === org);

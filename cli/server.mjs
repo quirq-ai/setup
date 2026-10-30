@@ -45,6 +45,7 @@ const MAX_BODY = 16 * 1024;
  * @typedef {{
  *   state: () => Promise<unknown>,
  *   repos: (org: string) => Promise<unknown>,
+ *   policies: () => Promise<unknown>,
  *   submit: (body: unknown) => Promise<{ ok: true } | { ok: false, error: string, status?: number }>,
  *   machine: {
  *     state: () => Promise<unknown>,
@@ -113,6 +114,7 @@ export async function startServer({ root, handlers, port = 0, onSession = () => 
         if (req.method === "GET" && url.pathname === "/api/repos") {
           return send(res, 200, await handlers.repos(url.searchParams.get("org") ?? ""));
         }
+        if (req.method === "GET" && url.pathname === "/api/policies") return send(res, 200, await handlers.policies());
         // The "This machine" panel (cli/machine.mjs): the page sends choices and a plan's id, never a command.
         if (req.method === "GET" && url.pathname === "/api/machine") return send(res, 200, await handlers.machine.state());
         if (req.method === "GET" && url.pathname === "/api/machine/run") {

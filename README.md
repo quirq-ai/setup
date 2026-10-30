@@ -56,6 +56,15 @@ terminal as [`install`](#install-update-or-remove-qq-and-xo).
    `build` and `typecheck` scripts) or Gatsby site (pnpm with `build` and `test` scripts). Others
    are listed with the reason, including private repos: GitHub offers a merge queue on private repos
    only on Enterprise Cloud, so v0 sets up public repos only.
+   - **3. Repos and policies in quirq-ai** (shown when your gh login is a member of quirq-ai). It lists
+   every repo gate's `settings/github.toml` or infra-config's `config/repos.toml` names, each with its
+   testing pipelines (`config/pipelines.toml`), its merge rules (approvals, code-owner review,
+   auto-merge, required checks), its release channels, its CODEOWNERS, and whether GitHub has the
+   `qq-main` ruleset on it ("applied", "not applied", or "could not check", never read as missing). A
+   repo registered in infra-config that gate does not list yet is shown apart. GETs only: adding,
+   editing and removing a repo's policies from this page come next, after review
+   (the plan is in the project's `repo-policies/plan.md`). The TOML is read by `cli/toml.mjs`, which
+   reads only the subset those files use and refuses anything else rather than reading it half.
 3. **Reads what already guards each picked repo** (merge settings, rulesets and branch
    protection, all with GETs) and prints a warning for anything that would get in qq's way, or
    "no existing protection found".

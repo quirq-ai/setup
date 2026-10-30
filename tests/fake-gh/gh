@@ -47,6 +47,63 @@ const routes = {
   // An old repo past the 100 the form lists: only a direct GET finds it.
   "repos/acme-labs/old-archive-2019": { name: "old-archive-2019" },
 };
+// FAKE_GH_QUIRQ: the login is also a member of quirq-ai, so the form offers step 3 (its repo policies).
+const text = (t) => ({ encoding: "base64", content: Buffer.from(t).toString("base64") });
+if (process.env.FAKE_GH_QUIRQ) {
+  routes["user/memberships/orgs?state=active&per_page=100&page=1"].push({ role: "member", organization: { login: "quirq-ai" } });
+  Object.assign(routes, {
+    "repos/quirq-ai/gate/contents/settings/github.toml?ref=main": text(`[main]
+ruleset = "qq-main"
+required_approvals = 0
+
+[[repo]]
+name = "web"
+kind = "product"
+allow_auto_merge = true
+required_approvals = 1
+transitional_checks = []
+
+[[repo]]
+name = "gate"
+kind = "infra"
+allow_auto_merge = true
+checks = ["presubmit"]
+code_owner_review = true
+`),
+    "repos/quirq-ai/infra-config/contents/config/repos.toml?ref=main": text(`[[repo]]
+name = "web"
+kinds = ["node-app"]
+channels = ["canary", "stable"]
+[repo.deploy]
+target = "vercel"
+
+[[repo]]
+name = "cli"
+kinds = ["python-package"]
+channels = []
+`),
+    "repos/quirq-ai/infra-config/contents/config/pipelines.toml?ref=main": text(`[[builder]]
+name = "web-presubmit"
+repo = "web"
+pipeline = "presubmit"
+triggers = ["change", "queue"]
+blocking = true
+generate = true
+
+[[builder]]
+name = "cli-presubmit"
+repo = "cli"
+pipeline = "presubmit"
+triggers = ["change", "queue"]
+blocking = true
+generate = true
+`),
+    "repos/quirq-ai/web/rulesets?includes_parents=true": [{ id: 1, name: "qq-main", enforcement: "active" }],
+    "repos/quirq-ai/web/contents/.github/CODEOWNERS?ref=main": text("* @sam-example\n"),
+    "repos/quirq-ai/gate/rulesets?includes_parents=true": [],
+    "repos/quirq-ai/cli/rulesets?includes_parents=true": [],
+  });
+}
 // FAKE_GH_NO_ORGS: a login that owns no org (it is only a member of big-co).
 if (process.env.FAKE_GH_NO_ORGS) routes["user/memberships/orgs?state=active&per_page=100&page=1"].splice(0, 1);
 // FAKE_GH_NO_LOGIN: gh is installed but not logged in.

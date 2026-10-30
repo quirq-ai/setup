@@ -927,3 +927,54 @@ test("this machine: quick changes of choice settle on the last one", async ({ br
     await page.close();
   }
 });
+
+for (const scheme of ["light", "dark"] as const) {
+  for (const width of [390, 1280]) {
+    test(`step 3 ${width}px ${scheme}: quirq-ai's repos show their pipelines and policies, read only`, async ({ browser }) => {
+      const log = join(mkdtempSync(join(tmpdir(), "qq-setup-e2e-log-")), "gh.log");
+      const cli = await startCli({ FAKE_GH_QUIRQ: "1", FAKE_GH_LOG: log });
+      const page = await browser.newPage({ viewport: { width, height: width === 390 ? 844 : 800 }, colorScheme: scheme });
+      try {
+        await page.goto(cli.url);
+        await page.getByRole("button", { name: "3. quirq-ai policies" }).click();
+        await page.getByRole("button", { name: "Show quirq-ai's repos and policies" }).click();
+
+        const products = page.getByRole("region", { name: "Products" });
+        await expect(products.getByText("applied on GitHub")).toBeVisible();
+        await products.getByRole("button", { name: /web/ }).click();
+        await expect(products.getByRole("listitem").filter({ hasText: /^web-presubmit: presubmit, on change, queue, required to merge$/ })).toBeVisible();
+        await expect(products.getByText("Required checks (from its required pipelines):")).toBeVisible();
+        await expect(products.getByText("1 approval needed")).toBeVisible();
+        await expect(products.getByText("Channels: canary, stable; deploys to vercel")).toBeVisible();
+        await expect(products.getByText("* @sam-example")).toBeVisible();
+
+        // Registered in infra-config, but gate has no [[repo]] for it: said, never shown as gated.
+        const unlisted = page.getByRole("region", { name: "Registered, not behind the gate yet" });
+        await expect(unlisted.getByText("no merge rules yet")).toBeVisible();
+        await unlisted.getByRole("button", { name: /cli/ }).click();
+        await expect(unlisted.getByText(/not behind the gate yet: gate settings\/github.toml has no \[\[repo\]\]/)).toBeVisible();
+
+        // Listed by gate, but GitHub has no qq-main ruleset on it.
+        const infra = page.getByRole("region", { name: "qq's own repos" });
+        await expect(infra.getByText("not applied on GitHub")).toBeVisible();
+        await infra.getByRole("button", { name: /gate/ }).click();
+        await expect(infra.getByText("No approval needed, from a code owner")).toBeVisible();
+        await expect(infra.getByText(/has not run gate's settings apply/)).toBeVisible();
+
+        const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+        expect(overflow).toBeLessThanOrEqual(0);
+        mkdirSync(SHOTS, { recursive: true });
+        await page.getByRole("heading", { name: "3. Repos and policies in quirq-ai" }).scrollIntoViewIfNeeded();
+        await page.screenshot({ path: join(SHOTS, `policies-${width}-${scheme}.png`), fullPage: true });
+
+        // Only GETs reached gh (the fake refuses anything else), and only the three settings files,
+        // rulesets and CODEOWNERS for quirq-ai.
+        const asked = readFileSync(log, "utf8").split("\n").filter((l) => l.startsWith("repos/quirq-ai/"));
+        expect(asked.every((p) => /\/(rulesets\?|contents\/(settings\/github\.toml|config\/(repos|pipelines)\.toml|(\.github\/|docs\/)?CODEOWNERS)\?)/.test(p))).toBe(true);
+      } finally {
+        await page.close();
+        cli.proc.kill();
+      }
+    });
+  }
+}

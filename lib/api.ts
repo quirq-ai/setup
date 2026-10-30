@@ -28,6 +28,8 @@ export type State = {
   // Why the GitHub parts are off (no gh, no login, missing scopes), or null when they work.
   github: string | null;
   platform: string;
+  // The login is in quirq-ai, whose repos step 3 shows (cli/policies.mjs).
+  policyOrg: boolean;
 };
 
 // The "This machine" panel (cli/machine.mjs). The page sends only a choice per tool and a plan's id.
@@ -55,6 +57,31 @@ export type Progress = {
   running: boolean;
   run: null | { id: string; steps: StepStatus[]; log: string; next: number; done: boolean; code: number | null; notes: string[] };
 };
+// Step 3 (cli/policies.mjs): quirq-ai's repos and what each is set up with. Read only.
+export type Pipeline = { name: string; pipeline: string; triggers: string[]; blocking: boolean; generated: boolean };
+export type RepoPolicy = {
+  name: string;
+  kind: "product" | "infra" | "unlisted";
+  gated: boolean;
+  kinds: string[];
+  channels: string[];
+  deploy: string | null;
+  pipelines: Pipeline[];
+  merge: null | {
+    approvals: number;
+    autoMerge: boolean;
+    codeOwnerReview: boolean;
+    checks: string[];
+    checksFrom: "settings" | "pipelines";
+    extra: string[];
+  };
+  owners: null | { path: string | null; rules: { pattern: string; owners: string[] }[] };
+  ownersError?: string;
+  ruleset: "applied" | "missing" | "unknown";
+  rulesetNote?: string;
+  notes: string[];
+};
+export type Policies = { ok: true; org: string; ruleset: string; read: { file: string; url: string }[]; repos: RepoPolicy[] };
 export type RepoList = { org: string; truncated: boolean; repos: Repo[] };
 export type StarterKind = "node-app" | "python-service";
 export type Answers = { org: string; repos: string[]; starter: null | { name: string; kind: StarterKind } };
@@ -143,6 +170,7 @@ export const api = {
   },
   state: () => call<State>("/api/state"),
   repos: (org: string) => call<RepoList>(`/api/repos?org=${encodeURIComponent(org)}`),
+  policies: () => call<Policies>("/api/policies"),
   machine: () => call<Machine>("/api/machine"),
   plan: (choice: Choice, seen: string) =>
     call<Plan>("/api/machine/plan", {
