@@ -17,6 +17,7 @@ export const SOURCES = /** @type {const} */ ({
   gate: { repo: "gate", path: "settings/github.toml" },
   repos: { repo: "infra-config", path: "config/repos.toml" },
   pipelines: { repo: "infra-config", path: "config/pipelines.toml" },
+  org: { repo: "infra-config", path: "config/org.toml" },
 });
 
 /** Where GitHub looks for CODEOWNERS, in its order. */
@@ -34,7 +35,7 @@ const CODEOWNERS_PATHS = [".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"]
  *   channels: string[],
  *   deploy: string | null,
  *   pipelines: Pipeline[],
- *   merge: null | { approvals: number, autoMerge: boolean, codeOwnerReview: boolean, checks: string[],
+ *   merge: null | { approvals: number, autoMerge: boolean | null, codeOwnerReview: boolean, checks: string[],
  *     checksFrom: "settings" | "pipelines", extra: string[] },
  *   owners: null | { path: string, rules: OwnerRule[] } | { path: null, rules: [] },
  *   ownersError?: string,
@@ -47,13 +48,14 @@ const CODEOWNERS_PATHS = [".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"]
  */
 
 /**
- * Pure: the cards for every repo the two registries name, before the per-repo reads.
+ * Pure: the cards for every repo the registries name, before the per-repo reads.
  * @param {any} gate  parsed gate settings/github.toml
- * @param {any} repos  parsed infra-config config/repos.toml
+ * @param {any} repos  parsed infra-config config/repos.toml (the products)
  * @param {any} pipelines  parsed infra-config config/pipelines.toml
+ * @param {any} [org]  parsed infra-config config/org.toml (its [[infra_repo]]s, as gate reads them)
  * @returns {RepoPolicy[]}
  */
-export function policyCards(gate, repos, pipelines) {
+export function policyCards(gate, repos, pipelines, org) {
   const main = gate?.main ?? {};
   const defaultApprovals = Number(main.required_approvals ?? 0);
   /** @type {Map<string, any>} */
@@ -62,9 +64,11 @@ export function policyCards(gate, repos, pipelines) {
   /** @type {Map<string, any>} */
   const products = new Map();
   for (const r of list(repos?.repo)) if (typeof r?.name === "string") products.set(r.name, r);
+  /** @type {Set<string>} */
+  const infraRepos = new Set(list(org?.infra_repo).map((r) => r?.name).filter((n) => typeof n === "string"));
   const builders = list(pipelines?.builder).filter((b) => typeof b?.name === "string" && typeof b?.repo === "string");
 
-  const names = [...new Set([...gated.keys(), ...products.keys()])];
+  const names = [...new Set([...gated.keys(), ...products.keys(), ...infraRepos])];
   return names.map((name) => /** @returns {RepoPolicy} */ {
     const g = gated.get(name);
     const p = products.get(name);
@@ -82,15 +86,20 @@ export function policyCards(gate, repos, pipelines) {
     const notes = [];
     /** @type {RepoPolicy["kind"]} */
     const kind = g ? (g.kind === "infra" ? "infra" : "product") : "unlisted";
-    if (p && !g) notes.push("registered in infra-config, but not behind the gate yet: gate settings/github.toml has no [[repo]] for it");
+    if (!g) {
+      const where = p ? "repos.toml" : "org.toml [[infra_repo]]";
+      notes.push(`registered in infra-config ${where}, but not behind the gate yet: gate settings/github.toml has no [[repo]] for it`);
+    }
+    if (g && g.kind !== "product" && g.kind !== "infra") notes.push(`gate settings give it kind ${JSON.stringify(g.kind)}, which is neither product nor infra; shown as a product`);
     if (g?.kind === "product" && !p) notes.push("gate lists it as a product, but infra-config repos.toml does not");
+    if (g?.kind === "infra" && org && !infraRepos.has(name)) notes.push("gate lists it as an infra repo, but infra-config org.toml has no [[infra_repo]] for it");
 
     /** @type {RepoPolicy["merge"]} */
     let merge = null;
     if (g) {
       const fromPipelines = g.kind !== "infra";
       const checks = fromPipelines
-        ? [...mine.filter((b) => b.pipeline === "presubmit" && b.blocking).map((b) => b.name), ...list(g.transitional_checks).map(String)]
+        ? [...mine.filter((b) => b.blocking).map((b) => b.name), ...list(g.transitional_checks).map(String)]
         : list(g.checks).map(String);
       /** @type {string[]} */
       const extra = [];
@@ -102,7 +111,8 @@ export function policyCards(gate, repos, pipelines) {
       if (g.dependabot_branches === true) extra.push("Dependabot branch rules on");
       merge = {
         approvals: typeof g.required_approvals === "number" ? g.required_approvals : defaultApprovals,
-        autoMerge: g.allow_auto_merge === true,
+        // gate writes allow_auto_merge only when the key is there; without it GitHub keeps its own setting.
+        autoMerge: typeof g.allow_auto_merge === "boolean" ? g.allow_auto_merge : null,
         codeOwnerReview: g.code_owner_review === true,
         checks,
         checksFrom: fromPipelines ? "pipelines" : "settings",
@@ -185,48 +195,60 @@ async function readFile(repo, path, ref = "main") {
   }
 }
 
+/** @param {unknown} e */
+const why = (e) => (e instanceof Error ? e.message : String(e));
+
+/**
+ * The CODEOWNERS GitHub uses on the repo's default branch. A repo that cannot be read at all (not
+ * there, or not visible to this login: GitHub answers both with a 404) is an error, never "no file".
+ * @param {string} repo
+ * @returns {Promise<{ owners: RepoPolicy["owners"], ownersError?: string }>}
+ */
+async function readOwners(repo) {
+  let branch;
+  try {
+    const r = await getJson(`repos/${POLICY_ORG}/${repo}`);
+    branch = typeof r?.default_branch === "string" ? r.default_branch : "main";
+  } catch (e) {
+    const reason = e instanceof GhError && e.status === 404 ? "the repo is not there, or not visible to your gh login" : why(e);
+    return { owners: null, ownersError: `could not read CODEOWNERS: ${reason}` };
+  }
+  try {
+    const texts = await Promise.all(CODEOWNERS_PATHS.map((path) => readFile(repo, path, branch)));
+    const i = texts.findIndex((t) => t !== null);
+    return { owners: i < 0 ? { path: null, rules: [] } : { path: CODEOWNERS_PATHS[i], rules: parseCodeowners(/** @type {string} */ (texts[i])) } };
+  } catch (e) {
+    return { owners: null, ownersError: `could not read CODEOWNERS: ${why(e)}` };
+  }
+}
+
 /** @returns {Promise<Policies>} */
 export async function readPolicies() {
   /** @type {Record<keyof typeof SOURCES, any>} */
   const parsed = /** @type {any} */ ({});
-  for (const [id, src] of Object.entries(SOURCES)) {
-    let text;
-    try {
-      text = await readFile(src.repo, src.path);
-    } catch (e) {
-      return { ok: false, error: `could not read ${src.repo}/${src.path}: ${e instanceof Error ? e.message : String(e)}` };
-    }
-    if (text === null) return { ok: false, error: `${POLICY_ORG}/${src.repo} has no ${src.path} on main` };
-    try {
-      parsed[/** @type {keyof typeof SOURCES} */ (id)] = parseToml(text);
-    } catch (e) {
-      return { ok: false, error: `could not read ${src.repo}/${src.path}: ${e instanceof Error ? e.message : String(e)}` };
-    }
-  }
-  const ruleset = typeof parsed.gate?.main?.ruleset === "string" ? parsed.gate.main.ruleset : "qq-main";
-  const cards = policyCards(parsed.gate, parsed.repos, parsed.pipelines).filter((c) => isName(c.name));
-  const repos = await mapLimit(cards, 8, async (card) => {
-    let rules;
-    try {
-      rules = await getJson(`repos/${POLICY_ORG}/${card.name}/rulesets?includes_parents=true`);
-    } catch (e) {
-      rules = e instanceof Error ? e : new Error(String(e));
-    }
-    const out = { ...card, ...rulesetState(rules, ruleset) };
-    try {
-      out.owners = { path: null, rules: [] };
-      for (const path of CODEOWNERS_PATHS) {
-        const text = await readFile(card.name, path);
-        if (text !== null) {
-          out.owners = { path, rules: parseCodeowners(text) };
-          break;
-        }
+  const read = await Promise.all(
+    Object.entries(SOURCES).map(async ([id, src]) => {
+      try {
+        const text = await readFile(src.repo, src.path);
+        if (text === null) return `${POLICY_ORG}/${src.repo} has no ${src.path} on main`;
+        parsed[/** @type {keyof typeof SOURCES} */ (id)] = parseToml(text);
+        return null;
+      } catch (e) {
+        return `could not read ${src.repo}/${src.path}: ${why(e)}`;
       }
-    } catch (e) {
-      out.owners = null;
-      out.ownersError = `could not read CODEOWNERS: ${e instanceof Error ? e.message : String(e)}`;
-    }
-    return out;
+    }),
+  );
+  const failed = read.find((r) => r !== null);
+  if (failed) return { ok: false, error: failed };
+  const ruleset = typeof parsed.gate?.main?.ruleset === "string" ? parsed.gate.main.ruleset : "qq-main";
+  const cards = policyCards(parsed.gate, parsed.repos, parsed.pipelines, parsed.org).filter((c) => isName(c.name));
+  // Each repo starts up to five gh processes at once (rulesets, the repo, three CODEOWNERS paths).
+  const repos = await mapLimit(cards, 4, async (card) => {
+    const [rules, owners] = await Promise.all([
+      getJson(`repos/${POLICY_ORG}/${card.name}/rulesets?includes_parents=true&per_page=100`).catch((e) => (e instanceof Error ? e : new Error(String(e)))),
+      readOwners(card.name),
+    ]);
+    return { ...card, ...rulesetState(rules, ruleset), ...owners };
   });
   return {
     ok: true,

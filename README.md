@@ -56,14 +56,17 @@ terminal as [`install`](#install-update-or-remove-qq-and-xo).
    `build` and `typecheck` scripts) or Gatsby site (pnpm with `build` and `test` scripts). Others
    are listed with the reason, including private repos: GitHub offers a merge queue on private repos
    only on Enterprise Cloud, so v0 sets up public repos only.
-   - **3. Repos and policies in quirq-ai** (shown when your gh login is a member of quirq-ai). It lists
-   every repo gate's `settings/github.toml` or infra-config's `config/repos.toml` names, each with its
+   - **The form's third step, repos and policies in quirq-ai** (shown when your gh login is a member of
+   quirq-ai; the terminal steps below are unrelated). It lists every repo gate's `settings/github.toml`,
+   infra-config's `config/repos.toml` or its `config/org.toml` `[[infra_repo]]` names, each with its
    testing pipelines (`config/pipelines.toml`), its merge rules (approvals, code-owner review,
-   auto-merge, required checks), its release channels, its CODEOWNERS, and whether GitHub has the
-   `qq-main` ruleset on it ("applied", "not applied", or "could not check", never read as missing). A
-   repo registered in infra-config that gate does not list yet is shown apart. GETs only: adding,
-   editing and removing a repo's policies from this page come next, after review
-   (the plan is in the project's `repo-policies/plan.md`). The TOML is read by `cli/toml.mjs`, which
+   auto-merge, required checks), its release channels, its CODEOWNERS, and whether GitHub has an active
+   `qq-main` ruleset on it ("ruleset on GitHub", "no ruleset on GitHub", or "could not check", never read
+   as missing). It does not compare that ruleset's rules with gate's settings: a merged gate change
+   reaches GitHub only when an org admin runs gate's settings apply. A repo registered in infra-config
+   that gate does not list yet is shown apart, and a repo or CODEOWNERS it cannot read says so rather
+   than "none". GETs only: adding, editing and removing a repo's policies from this page come next,
+   after review. The TOML is read by `cli/toml.mjs`, which
    reads only the subset those files use and refuses anything else rather than reading it half.
 3. **Reads what already guards each picked repo** (merge settings, rulesets and branch
    protection, all with GETs) and prints a warning for anything that would get in qq's way, or

@@ -98,10 +98,16 @@ triggers = ["change", "queue"]
 blocking = true
 generate = true
 `),
-    "repos/quirq-ai/web/rulesets?includes_parents=true": [{ id: 1, name: "qq-main", enforcement: "active" }],
+    "repos/quirq-ai/infra-config/contents/config/org.toml?ref=main": text(`[[infra_repo]]
+name = "gate"
+`),
+    // The repos themselves, for their default branch; cli is registered but not there (404).
+    "repos/quirq-ai/web": repo("web"),
+    "repos/quirq-ai/gate": repo("gate"),
+    "repos/quirq-ai/web/rulesets?includes_parents=true&per_page=100": [{ id: 1, name: "qq-main", enforcement: "active" }],
     "repos/quirq-ai/web/contents/.github/CODEOWNERS?ref=main": text("* @sam-example\n"),
-    "repos/quirq-ai/gate/rulesets?includes_parents=true": [],
-    "repos/quirq-ai/cli/rulesets?includes_parents=true": [],
+    "repos/quirq-ai/gate/rulesets?includes_parents=true&per_page=100": [],
+    "repos/quirq-ai/cli/rulesets?includes_parents=true&per_page=100": [],
   });
 }
 // FAKE_GH_NO_ORGS: a login that owns no org (it is only a member of big-co).

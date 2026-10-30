@@ -20,8 +20,8 @@ const KIND_TITLE: Record<RepoPolicy["kind"], string> = {
 };
 
 const APPLIED: Record<RepoPolicy["ruleset"], { word: string; color: string; outline?: true }> = {
-  applied: { word: "applied on GitHub", color: "var(--state-green)" },
-  missing: { word: "not applied on GitHub", color: "var(--state-held)" },
+  applied: { word: "ruleset on GitHub", color: "var(--state-green)" },
+  missing: { word: "no ruleset on GitHub", color: "var(--state-held)" },
   unknown: { word: "could not check GitHub", color: "var(--state-unknown)", outline: true },
 };
 
@@ -47,7 +47,7 @@ export function PoliciesPanel() {
         </CardTitle>
         <CardDescription>
           What each quirq-ai repo is tested with and the rules its pull requests must pass, read from gate and
-          infra-config on main, and whether GitHub has them. This version only reads.
+          infra-config on main, and whether GitHub has gate&apos;s ruleset on it. This version only reads.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
@@ -127,6 +127,12 @@ function RepoRow({ repo: r, ruleset }: { repo: RepoPolicy; ruleset: string }) {
           </p>
         ))}
         {r.rulesetNote && <p className="text-muted-foreground">{r.rulesetNote}</p>}
+        {r.gated && r.ruleset === "applied" && (
+          <p className="text-muted-foreground">
+            GitHub has an active {ruleset} ruleset on it. Its rules are not compared with gate&apos;s settings here: a
+            change merged in gate reaches GitHub only when an org admin runs gate&apos;s settings apply.
+          </p>
+        )}
         {r.gated && r.ruleset === "missing" && !r.rulesetNote && (
           <p className="text-muted-foreground">
             gate lists it, but GitHub has no {ruleset} ruleset on it: an org admin has not run gate&apos;s settings
@@ -159,7 +165,11 @@ function RepoRow({ repo: r, ruleset }: { repo: RepoPolicy; ruleset: string }) {
                 {r.merge.approvals === 0 ? "No approval needed" : `${r.merge.approvals} approval${r.merge.approvals > 1 ? "s" : ""} needed`}
                 {r.merge.codeOwnerReview && ", from a code owner"}
               </li>
-              <li>Auto-merge {r.merge.autoMerge ? "allowed" : "off: pull requests land by hand"}</li>
+              <li>
+                {r.merge.autoMerge === null
+                  ? "Auto-merge not set by gate: GitHub keeps the repo's own setting"
+                  : `Auto-merge ${r.merge.autoMerge ? "allowed" : "off: pull requests land by hand"}`}
+              </li>
               <li>
                 Required checks {r.merge.checksFrom === "pipelines" ? "(from its required pipelines)" : "(listed in gate's settings)"}:{" "}
                 {r.merge.checks.length ? <span className="font-mono break-all">{r.merge.checks.join(", ")}</span> : "none"}

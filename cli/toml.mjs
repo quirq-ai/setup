@@ -18,6 +18,16 @@ export class TomlError extends Error {
 }
 
 const BARE = /^[A-Za-z0-9_-]+$/;
+// Names that would reach Object.prototype through a plain object: refused, never followed.
+const RESERVED = new Set(["__proto__", "constructor", "prototype"]);
+// TOML numbers: no leading zero, and an underscore only between digits.
+const DIGITS = String.raw`\d(?:_?\d)*`;
+const NUMBER = new RegExp(String.raw`^([+-]?(?:0|[1-9](?:_?\d)*)(?:\.${DIGITS})?(?:[eE][+-]?${DIGITS})?|true|false)(?=[\s,\]]|$)`);
+
+/** @param {string} key @param {number} n */
+function checkKey(key, n) {
+  if (!BARE.test(key) || RESERVED.has(key)) throw new TomlError(`unsupported key ${key}`, n);
+}
 
 /**
  * @param {string} text
@@ -28,6 +38,9 @@ export function parseToml(text) {
   const root = {};
   /** @type {Table} */
   let current = root;
+  // Tables made only because a dotted header named them (`a` for `[a.b]`): `[a]` may still follow once.
+  /** @type {WeakSet<Table>} */
+  const implicit = new WeakSet();
   const lines = text.replace(/\r\n/g, "\n").split("\n");
   for (let i = 0; i < lines.length; i++) {
     const n = i + 1;
@@ -36,9 +49,9 @@ export function parseToml(text) {
     let m;
     if ((m = /^\[\[\s*([^\]]+?)\s*\]\]$/.exec(line))) {
       const path = tablePath(m[1], n);
-      const parent = walk(root, path.slice(0, -1), n);
+      const parent = walk(root, path.slice(0, -1), n, implicit);
       const last = path[path.length - 1];
-      const list = parent[last] ?? (parent[last] = []);
+      const list = Object.hasOwn(parent, last) ? parent[last] : (parent[last] = []);
       if (!Array.isArray(list) || list.some((x) => !isTable(x))) throw new TomlError(`${m[1]} is not an array of tables`, n);
       /** @type {Table} */
       const t = {};
@@ -48,11 +61,13 @@ export function parseToml(text) {
     }
     if ((m = /^\[\s*([^\]]+?)\s*\]$/.exec(line))) {
       const path = tablePath(m[1], n);
-      const parent = walk(root, path.slice(0, -1), n);
+      const parent = walk(root, path.slice(0, -1), n, implicit);
       const last = path[path.length - 1];
-      if (Object.hasOwn(parent, last)) throw new TomlError(`table ${m[1]} defined twice`, n);
+      const before = Object.hasOwn(parent, last) ? parent[last] : undefined;
+      if (before !== undefined && !(isTable(before) && implicit.has(before))) throw new TomlError(`table ${m[1]} defined twice`, n);
       /** @type {Table} */
-      const t = {};
+      const t = before ?? {};
+      implicit.delete(t);
       parent[last] = t;
       current = t;
       continue;
@@ -60,7 +75,7 @@ export function parseToml(text) {
     const eq = line.indexOf("=");
     if (eq <= 0) throw new TomlError("expected key = value", n);
     const key = line.slice(0, eq).trim();
-    if (!BARE.test(key)) throw new TomlError(`unsupported key ${key}`, n);
+    checkKey(key, n);
     if (Object.hasOwn(current, key)) throw new TomlError(`${key} set twice`, n);
     let rest = line.slice(eq + 1).trim();
     // An array may continue over the next lines until its brackets balance.
@@ -84,17 +99,26 @@ function isTable(x) {
 /** @param {string} name @param {number} n */
 function tablePath(name, n) {
   const path = name.split(".").map((p) => p.trim());
-  if (path.some((p) => !BARE.test(p))) throw new TomlError(`unsupported table name ${name}`, n);
+  if (path.some((p) => !BARE.test(p) || RESERVED.has(p))) throw new TomlError(`unsupported table name ${name}`, n);
   return path;
 }
 
-/** Follow a table path, into the last table of an array of tables, creating plain tables on the way. */
-function walk(/** @type {Table} */ root, /** @type {string[]} */ path, /** @type {number} */ n) {
+/**
+ * Follow a table path, into the last table of an array of tables, creating plain tables on the way
+ * (marked implicit). Only own properties are followed.
+ * @param {Table} root @param {string[]} path @param {number} n @param {WeakSet<Table>} implicit
+ */
+function walk(root, path, n, implicit) {
   let t = root;
   for (const p of path) {
     /** @type {unknown} */
-    let next = t[p];
-    if (next === undefined) next = t[p] = {};
+    let next = Object.hasOwn(t, p) ? t[p] : undefined;
+    if (next === undefined) {
+      /** @type {Table} */
+      const made = {};
+      implicit.add(made);
+      next = t[p] = made;
+    }
     if (Array.isArray(next)) next = next[next.length - 1];
     if (!isTable(next)) throw new TomlError(`${p} is not a table`, n);
     t = next;
@@ -163,21 +187,24 @@ function readValue(s, at, n) {
     /** @type {Value[]} */
     const items = [];
     let i = at + 1;
+    const space = () => {
+      while (/\s/.test(s[i] ?? "")) i++;
+    };
     for (;;) {
-      while (/\s|,/.test(s[i] ?? "")) {
-        if (s[i] === "," && !items.length) throw new TomlError("array starts with a comma", n);
-        i++;
-      }
+      // One value, then one comma or the end; a trailing comma before ] is allowed.
+      space();
       if (s[i] === "]") return { value: items, end: i + 1 };
       if (i >= s.length) throw new TomlError("array never closes", n);
+      if (s[i] === ",") throw new TomlError("comma with no value before it in array", n);
       const item = readValue(s, i, n);
       items.push(item.value);
       i = item.end;
-      while (s[i] === " " || s[i] === "\t") i++;
-      if (s[i] !== "," && s[i] !== "]") throw new TomlError("expected , or ] in array", n);
+      space();
+      if (s[i] === ",") i++;
+      else if (s[i] !== "]") throw new TomlError("expected , or ] in array", n);
     }
   }
-  const m = /^(true|false|[+-]?\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?)(?=[\s,\]]|$)/.exec(s.slice(at));
+  const m = NUMBER.exec(s.slice(at));
   if (!m) throw new TomlError(`unsupported value ${s.slice(at, at + 20)}`, n);
   const word = m[1];
   const value = word === "true" ? true : word === "false" ? false : Number(word.replace(/_/g, ""));

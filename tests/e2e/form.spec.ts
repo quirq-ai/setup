@@ -940,23 +940,26 @@ for (const scheme of ["light", "dark"] as const) {
         await page.getByRole("button", { name: "Show quirq-ai's repos and policies" }).click();
 
         const products = page.getByRole("region", { name: "Products" });
-        await expect(products.getByText("applied on GitHub")).toBeVisible();
+        await expect(products.getByText("ruleset on GitHub", { exact: true })).toBeVisible();
         await products.getByRole("button", { name: /web/ }).click();
         await expect(products.getByRole("listitem").filter({ hasText: /^web-presubmit: presubmit, on change, queue, required to merge$/ })).toBeVisible();
         await expect(products.getByText("Required checks (from its required pipelines):")).toBeVisible();
         await expect(products.getByText("1 approval needed")).toBeVisible();
         await expect(products.getByText("Channels: canary, stable; deploys to vercel")).toBeVisible();
         await expect(products.getByText("* @sam-example")).toBeVisible();
+        await expect(products.getByText(/Its rules are not compared with gate's settings here/)).toBeVisible();
 
         // Registered in infra-config, but gate has no [[repo]] for it: said, never shown as gated.
         const unlisted = page.getByRole("region", { name: "Registered, not behind the gate yet" });
         await expect(unlisted.getByText("no merge rules yet")).toBeVisible();
         await unlisted.getByRole("button", { name: /cli/ }).click();
+        // The repo itself cannot be read: that is said, never shown as "No CODEOWNERS file".
+        await expect(unlisted.getByText(/could not read CODEOWNERS: the repo is not there, or not visible/)).toBeVisible();
         await expect(unlisted.getByText(/not behind the gate yet: gate settings\/github.toml has no \[\[repo\]\]/)).toBeVisible();
 
         // Listed by gate, but GitHub has no qq-main ruleset on it.
         const infra = page.getByRole("region", { name: "qq's own repos" });
-        await expect(infra.getByText("not applied on GitHub")).toBeVisible();
+        await expect(infra.getByText("no ruleset on GitHub")).toBeVisible();
         await infra.getByRole("button", { name: /gate/ }).click();
         await expect(infra.getByText("No approval needed, from a code owner")).toBeVisible();
         await expect(infra.getByText(/has not run gate's settings apply/)).toBeVisible();
@@ -967,10 +970,10 @@ for (const scheme of ["light", "dark"] as const) {
         await page.getByRole("heading", { name: "3. Repos and policies in quirq-ai" }).scrollIntoViewIfNeeded();
         await page.screenshot({ path: join(SHOTS, `policies-${width}-${scheme}.png`), fullPage: true });
 
-        // Only GETs reached gh (the fake refuses anything else), and only the three settings files,
-        // rulesets and CODEOWNERS for quirq-ai.
+        // Only GETs reached gh (the fake refuses anything else), and only the four settings files,
+        // the repo itself (for its default branch), its rulesets and CODEOWNERS for quirq-ai.
         const asked = readFileSync(log, "utf8").split("\n").filter((l) => l.startsWith("repos/quirq-ai/"));
-        expect(asked.every((p) => /\/(rulesets\?|contents\/(settings\/github\.toml|config\/(repos|pipelines)\.toml|(\.github\/|docs\/)?CODEOWNERS)\?)/.test(p))).toBe(true);
+        expect(asked.every((p) => /^repos\/quirq-ai\/[^/]+(\/rulesets\?|\/contents\/(settings\/github\.toml|config\/(repos|pipelines|org)\.toml|(\.github\/|docs\/)?CODEOWNERS)\?|$)/.test(p))).toBe(true);
       } finally {
         await page.close();
         cli.proc.kill();

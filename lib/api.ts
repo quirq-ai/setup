@@ -69,7 +69,8 @@ export type RepoPolicy = {
   pipelines: Pipeline[];
   merge: null | {
     approvals: number;
-    autoMerge: boolean;
+    // null: gate's settings do not set it, so GitHub keeps the repo's own setting.
+    autoMerge: boolean | null;
     codeOwnerReview: boolean;
     checks: string[];
     checksFrom: "settings" | "pipelines";
