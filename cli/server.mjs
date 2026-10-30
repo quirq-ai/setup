@@ -46,6 +46,8 @@ const MAX_BODY = 16 * 1024;
  *   state: () => Promise<unknown>,
  *   repos: (org: string) => Promise<unknown>,
  *   policies: () => Promise<unknown>,
+ *   policyPlan: (body: unknown) => Promise<Result>,
+ *   policyOpen: (body: unknown) => Promise<Result>,
  *   submit: (body: unknown) => Promise<{ ok: true } | { ok: false, error: string, status?: number }>,
  *   machine: {
  *     state: () => Promise<unknown>,
@@ -121,7 +123,9 @@ export async function startServer({ root, handlers, port = 0, onSession = () => 
           return send(res, 200, handlers.machine.progress(Number(url.searchParams.get("from") ?? 0)));
         }
         /** @type {Record<string, (body: unknown) => Promise<Result>>} */
-        const posts = { "/api/answers": handlers.submit, "/api/machine/plan": handlers.machine.plan, "/api/machine/run": handlers.machine.start };
+        // Step 3's writes (cli/policy-write.mjs): the page sends a repo and values, then a plan's id and a step.
+        const posts = { "/api/answers": handlers.submit, "/api/machine/plan": handlers.machine.plan, "/api/machine/run": handlers.machine.start,
+          "/api/policies/plan": handlers.policyPlan, "/api/policies/open": handlers.policyOpen };
         if (req.method === "POST" && Object.hasOwn(posts, url.pathname)) {
           if (!String(req.headers["content-type"] ?? "").startsWith("application/json")) {
             return send(res, 415, { error: "expected application/json" });

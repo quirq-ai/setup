@@ -1,0 +1,17 @@
+[main]
+ruleset = "qq-main"
+required_approvals = 0
+
+[[repo]]
+name = "web"
+kind = "product"
+allow_auto_merge = true
+required_approvals = 1
+transitional_checks = []
+
+[[repo]]
+name = "gate"
+kind = "infra"
+allow_auto_merge = true
+checks = ["presubmit"]
+code_owner_review = true

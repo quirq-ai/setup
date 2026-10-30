@@ -7,11 +7,12 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Spinner } from "@/components/ui/spinner";
+import { PolicyChange } from "@/components/policy-change";
 import { api, type Policies, type RepoPolicy } from "@/lib/api";
 
 // Step 3: quirq-ai's repos with their testing pipelines and merge policies, read from the files that
-// own them and checked against GitHub's live rulesets. Read only: adding, editing and removing come
-// in a later version, after review.
+// own them and checked against GitHub's live rulesets. Changes go through PolicyChange, as pull
+// requests the person opens and merges.
 
 const KIND_TITLE: Record<RepoPolicy["kind"], string> = {
   product: "Products",
@@ -47,7 +48,8 @@ export function PoliciesPanel() {
         </CardTitle>
         <CardDescription>
           What each quirq-ai repo is tested with and the rules its pull requests must pass, read from gate and
-          infra-config on main, and whether GitHub has gate&apos;s ruleset on it. This version only reads.
+          infra-config on main, and whether GitHub has gate&apos;s ruleset on it. Below the list you can add, change or
+          remove a repo, as pull requests you review first.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
@@ -82,14 +84,14 @@ export function PoliciesPanel() {
               );
             })}
             <p className="text-sm text-muted-foreground">
-              Read from {data.read.map((r) => r.file).join(", ")} and each repo&apos;s CODEOWNERS. Until editing
-              lands here, change these through a pull request on those files (the monitoring site&apos;s settings
-              page opens one for a value), and an org admin runs gate&apos;s settings apply to put merge rules on
-              GitHub.
+              Read from {data.read.map((r) => r.file).join(", ")} and each repo&apos;s CODEOWNERS. Org-wide values
+              (channels, the canary, owners, gate.toml) stay in the monitoring site&apos;s settings page, and an org
+              admin runs gate&apos;s settings apply to put merge rules on GitHub.
             </p>
             <Button variant="outline" size="sm" onClick={load} disabled={loading} className="w-fit">
               {loading && <Spinner />} Read again
             </Button>
+            <PolicyChange data={data} />
           </>
         )}
       </CardContent>

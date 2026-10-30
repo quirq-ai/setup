@@ -57,7 +57,7 @@ export type Progress = {
   running: boolean;
   run: null | { id: string; steps: StepStatus[]; log: string; next: number; done: boolean; code: number | null; notes: string[] };
 };
-// Step 3 (cli/policies.mjs): quirq-ai's repos and what each is set up with. Read only.
+// Step 3 (cli/policies.mjs): quirq-ai's repos and what each is set up with.
 export type Pipeline = { name: string; pipeline: string; triggers: string[]; blocking: boolean; generated: boolean };
 export type RepoPolicy = {
   name: string;
@@ -82,7 +82,28 @@ export type RepoPolicy = {
   rulesetNote?: string;
   notes: string[];
 };
-export type Policies = { ok: true; org: string; ruleset: string; read: { file: string; url: string }[]; repos: RepoPolicy[] };
+export type PipelineKind = { name: string; capabilities: string[] };
+export type Policies = { ok: true; org: string; ruleset: string; read: { file: string; url: string }[]; repos: RepoPolicy[]; kinds: PipelineKind[] };
+
+// Step 3's writes (cli/policy-write.mjs): a plan shows each pull request as a diff; Open makes one.
+export type RepoFields = { approvals?: number; autoMerge?: boolean; codeOwnerReview?: boolean };
+export type PolicyRequest =
+  | { op: "add"; repo: string; fields: Required<Pick<RepoFields, "approvals" | "autoMerge">> & RepoFields; kinds: string[]; description: string }
+  | { op: "edit"; repo: string; fields: RepoFields }
+  | { op: "remove"; repo: string };
+export type PolicyStep = {
+  key: "infra-config" | "repo" | "gate" | "apply" | "rulesets";
+  repo: string;
+  title: string;
+  state: "done" | "open" | "ready" | "waiting" | "refused" | "manual";
+  detail: string;
+  url?: string;
+  diff?: string;
+  files?: string[];
+  command?: string;
+  notes?: string[];
+};
+export type PolicyPlan = { ok: true; id: string; op: PolicyRequest["op"]; repo: string; steps: PolicyStep[] };
 export type RepoList = { org: string; truncated: boolean; repos: Repo[] };
 export type StarterKind = "node-app" | "python-service";
 export type Answers = { org: string; repos: string[]; starter: null | { name: string; kind: StarterKind } };
@@ -172,6 +193,18 @@ export const api = {
   state: () => call<State>("/api/state"),
   repos: (org: string) => call<RepoList>(`/api/repos?org=${encodeURIComponent(org)}`),
   policies: () => call<Policies>("/api/policies"),
+  policyPlan: (req: PolicyRequest) =>
+    call<PolicyPlan>("/api/policies/plan", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(req),
+    }),
+  policyOpen: (id: string, step: PolicyStep["key"]) =>
+    call<{ ok: true; url: string }>("/api/policies/open", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id, step }),
+    }),
   machine: () => call<Machine>("/api/machine"),
   plan: (choice: Choice, seen: string) =>
     call<Plan>("/api/machine/plan", {

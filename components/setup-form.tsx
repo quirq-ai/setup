@@ -225,7 +225,9 @@ export function SetupForm() {
         <AboutTogether />
         {state?.readOnly && (
           <p className="text-sm text-muted-foreground">
-            It changes nothing on GitHub.
+            {state.policyOrg
+              ? "It changes nothing on GitHub except the quirq-ai pull requests you open in step 3."
+              : "It changes nothing on GitHub."}
             {" On this machine it runs only the steps you pick, after you press Run."}
           </p>
         )}

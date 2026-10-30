@@ -1,0 +1,15 @@
+[[builder]]
+name = "web-presubmit"
+repo = "web"
+pipeline = "presubmit"
+triggers = ["change", "queue"]
+blocking = true
+generate = true
+
+[[builder]]
+name = "cli-presubmit"
+repo = "cli"
+pipeline = "presubmit"
+triggers = ["change", "queue"]
+blocking = true
+generate = true

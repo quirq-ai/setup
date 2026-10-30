@@ -1,6 +1,7 @@
 // @ts-check
 // Every GitHub call goes through the user's own `gh` login: this command never reads, stores or
-// prints the token, because gh makes the HTTP request itself. This build only reads (GET).
+// prints the token, because gh makes the HTTP request itself. Reads are GETs; the only writes are
+// `ghWrite`'s, which step 3 uses to open pull requests in quirq-ai (cli/policy-write.mjs).
 
 import { execFile } from "node:child_process";
 
@@ -28,12 +29,12 @@ export class GhError extends Error {
 /**
  * Run gh with arguments (never a shell). Resolves with stdout.
  * @param {string[]} args
- * @param {{ timeoutMs?: number }} [opts]
+ * @param {{ timeoutMs?: number, input?: string }} [opts]  input: written to gh's stdin
  * @returns {Promise<string>}
  */
 export function gh(args, opts = {}) {
   return new Promise((resolve, reject) => {
-    execFile(
+    const child = execFile(
       "gh",
       args,
       { env: ghEnv(), timeout: opts.timeoutMs ?? 30_000, maxBuffer: 32 * 1024 * 1024 },
@@ -52,6 +53,7 @@ export function gh(args, opts = {}) {
         resolve(String(stdout));
       },
     );
+    if (opts.input !== undefined) child.stdin?.end(opts.input);
   });
 }
 
@@ -108,4 +110,35 @@ export { isName } from "./names.mjs";
 /** Percent-encode a branch name for a query string, leaving only characters PATH_RE accepts. @param {string} ref */
 export function encodeRef(ref) {
   return encodeURIComponent(ref).replace(/[!'()*~]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase());
+}
+
+/**
+ * The only writes this command makes, all in quirq-ai and all toward a pull request: a tree, a
+ * commit, a new branch under qq-setup/, and the pull request. Never a merge, a ref update, a
+ * delete, a setting or main. `ghWrite` refuses anything else before gh runs.
+ */
+const WRITES = [
+  /^repos\/quirq-ai\/[A-Za-z0-9._-]+\/git\/trees$/,
+  /^repos\/quirq-ai\/[A-Za-z0-9._-]+\/git\/commits$/,
+  /^repos\/quirq-ai\/[A-Za-z0-9._-]+\/git\/refs$/,
+  /^repos\/quirq-ai\/[A-Za-z0-9._-]+\/pulls$/,
+];
+
+/**
+ * POST a JSON body (on stdin, so nothing lands in a process list) to one of WRITES.
+ * @param {string} path
+ * @param {Record<string, unknown>} body
+ * @returns {Promise<any>}
+ */
+export async function ghWrite(path, body) {
+  if (!WRITES.some((re) => re.test(path)) || path.includes("..")) throw new GhError(`refusing to write to ${path}`);
+  if (path.endsWith("/git/refs") && !(typeof body.ref === "string" && /^refs\/heads\/qq-setup\/[A-Za-z0-9._-]+$/.test(body.ref))) {
+    throw new GhError("refusing to create a branch outside qq-setup/");
+  }
+  if (path.endsWith("/pulls") && !(typeof body.head === "string" && body.head.startsWith("qq-setup/"))) {
+    throw new GhError("refusing a pull request from a branch outside qq-setup/");
+  }
+  const out = await gh(["api", "--hostname", "github.com", "--method", "POST", "-H", "Accept: application/vnd.github+json",
+    path, "--input", "-"], { input: JSON.stringify(body), timeoutMs: 60_000 });
+  return JSON.parse(out);
 }

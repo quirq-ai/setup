@@ -1,0 +1,7 @@
+[[kind]]
+name = "node-app"
+capabilities = ["fetch", "build", "test"]
+
+[[kind]]
+name = "python-package"
+capabilities = ["fetch", "build", "test"]

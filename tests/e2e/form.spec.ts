@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { SYNC_PIN, XO_PIN } from "../../cli/install.mjs";
+import { makeRemotes } from "../fixtures/quirq/remotes.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const SHOTS = join(ROOT, "test-results", "screenshots");
@@ -973,7 +974,7 @@ for (const scheme of ["light", "dark"] as const) {
         // Only GETs reached gh (the fake refuses anything else), and only the four settings files,
         // the repo itself (for its default branch), its rulesets and CODEOWNERS for quirq-ai.
         const asked = readFileSync(log, "utf8").split("\n").filter((l) => l.startsWith("repos/quirq-ai/"));
-        expect(asked.every((p) => /^repos\/quirq-ai\/[^/]+(\/rulesets\?|\/contents\/(settings\/github\.toml|config\/(repos|pipelines|org)\.toml|(\.github\/|docs\/)?CODEOWNERS)\?|$)/.test(p))).toBe(true);
+        expect(asked.every((p) => /^repos\/quirq-ai\/[^/]+(\/rulesets\?|\/contents\/(settings\/github\.toml|config\/(repos|pipelines|org|kinds)\.toml|(\.github\/|docs\/)?CODEOWNERS)\?|$)/.test(p))).toBe(true);
       } finally {
         await page.close();
         cli.proc.kill();
@@ -981,3 +982,87 @@ for (const scheme of ["light", "dark"] as const) {
     });
   }
 }
+
+/** The CLI as a quirq-ai member whose step 3 clones local stand-ins and runs a stand-in Python. */
+async function startWriter() {
+  const log = join(mkdtempSync(join(tmpdir(), "qq-setup-e2e-log-")), "gh.log");
+  const base = makeRemotes();
+  const cli = await startCli({ FAKE_GH_QUIRQ: "1", FAKE_GH_LOG: log, FAKE_GH_REMOTES: base, QQ_SETUP_GIT_BASE: base,
+    QQ_PYTHON: join(ROOT, "tests", "fake-python", "python3") });
+  return { cli, log, writes: () => readFileSync(log, "utf8").split("\n").filter((l) => l.startsWith("POST ")) };
+}
+
+for (const scheme of ["light", "dark"] as const) {
+  for (const width of [390, 1280]) {
+    test(`step 3 ${width}px ${scheme}: change a repo's approvals, read the diff, open the pull request`, async ({ browser }) => {
+      const { cli, writes } = await startWriter();
+      const page = await browser.newPage({ viewport: { width, height: width === 390 ? 844 : 800 }, colorScheme: scheme });
+      try {
+        await page.goto(cli.url);
+        await page.getByRole("button", { name: "3. quirq-ai policies" }).click();
+        await page.getByRole("button", { name: "Show quirq-ai's repos and policies" }).click();
+        await page.getByRole("radio", { name: /Change a repo's merge rules/ }).click();
+        await page.getByLabel("Repo", { exact: true }).selectOption("web");
+        // The form starts from the repo's values: unchanged, there is nothing to plan.
+        await expect(page.getByLabel("Approvals a pull request needs (0 to 10)")).toHaveValue("1");
+        await page.getByRole("button", { name: "Plan the pull requests" }).click();
+        await expect(page.getByText("Nothing to change: these are its values now.")).toBeVisible();
+
+        await page.getByLabel("Approvals a pull request needs (0 to 10)").fill("2");
+        await page.getByRole("button", { name: "Plan the pull requests" }).click();
+        const diff = page.getByRole("region", { name: "Changes to gate" });
+        await expect(diff).toContainText("+required_approvals = 2");
+        await expect(diff).toContainText("-required_approvals = 1");
+        await expect(page.getByText("settings/github.toml, tests/golden/quirq-settings-plan.json")).toBeVisible();
+        await expect(page.getByText("ready to open")).toBeVisible();
+        await expect(page.getByText("waits on the step before")).toBeVisible();
+        expect(writes()).toEqual([]);
+
+        const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+        expect(overflow).toBeLessThanOrEqual(0);
+        mkdirSync(SHOTS, { recursive: true });
+        await page.getByRole("heading", { name: /Plan for/ }).scrollIntoViewIfNeeded();
+        await page.screenshot({ path: join(SHOTS, `policy-edit-${width}-${scheme}.png`), fullPage: true });
+
+        await page.getByRole("button", { name: "Open this pull request in gate" }).click();
+        const link = page.getByRole("link", { name: "The pull request on GitHub" });
+        await expect(link).toHaveAttribute("href", "https://github.com/quirq-ai/gate/pull/101");
+        await expect(link).toHaveAttribute("target", "_blank");
+        await expect(page.getByText("pull request open")).toBeVisible();
+        // One branch and one pull request, in quirq-ai/gate, never main.
+        const posted = writes().map((l) => l.split(" ").slice(0, 2).join(" "));
+        expect(posted).toEqual(["POST repos/quirq-ai/gate/git/trees", "POST repos/quirq-ai/gate/git/commits",
+          "POST repos/quirq-ai/gate/git/refs", "POST repos/quirq-ai/gate/pulls"]);
+        expect(writes()[2]).toMatch(/"ref":"refs\/heads\/qq-setup\/edit-web-[0-9a-f]{7}"/);
+        expect(writes()[3]).toMatch(/"base":"main"/);
+      } finally {
+        await page.close();
+        cli.proc.kill();
+      }
+    });
+  }
+}
+
+test("step 3: taking a product out says what stays on GitHub, and gate waits for infra-config", async ({ browser }) => {
+  const { cli, writes } = await startWriter();
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  try {
+    await page.goto(cli.url);
+    await page.getByRole("button", { name: "3. quirq-ai policies" }).click();
+    await page.getByRole("button", { name: "Show quirq-ai's repos and policies" }).click();
+    await page.getByRole("radio", { name: /Take a product repo out of qq/ }).click();
+    await expect(page.getByText(/What stays: the repo, its code, its qq-\*\.yml workflows and every ruleset/)).toBeVisible();
+    await page.getByLabel("Repo", { exact: true }).selectOption("web");
+    await page.getByRole("button", { name: "Plan the pull requests" }).click();
+    await expect(page.getByRole("region", { name: "Changes to infra-config" })).toContainText('-name = "web"');
+    await expect(page.getByText(/Planned once infra-config's pull request is merged/)).toBeVisible();
+    await expect(page.getByText(/Its qq-main ruleset \(and any other qq- ruleset\) stays live/)).toBeVisible();
+    // Only qq's own rulesets are listed for deletion, as commands for a person.
+    await expect(page.getByText("gh api --method DELETE repos/quirq-ai/web/rulesets/11   # qq-main")).toBeVisible();
+    await expect(page.getByText(/rulesets\/12/)).toHaveCount(0);
+    expect(writes()).toEqual([]);
+  } finally {
+    await page.close();
+    cli.proc.kill();
+  }
+});

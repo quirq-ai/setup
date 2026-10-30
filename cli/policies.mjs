@@ -2,8 +2,8 @@
 // Step 3 of the form: quirq-ai's repos and the pipelines and policies each one is set up with, read
 // from the files that own them (gate settings/github.toml, infra-config config/repos.toml and
 // config/pipelines.toml, each repo's CODEOWNERS) and from GitHub's live rulesets. GETs only.
-// Editing them comes later, after review (repo-policies plan): this step shows where each value
-// lives and whether GitHub matches it.
+// This step shows where each value lives and whether GitHub matches it; cli/policy-write.mjs turns
+// an add, edit or remove into pull requests.
 
 import { encodeRef, getJson, GhError, isName } from "./gh.mjs";
 import { mapLimit } from "./facts.mjs";
@@ -18,6 +18,7 @@ export const SOURCES = /** @type {const} */ ({
   repos: { repo: "infra-config", path: "config/repos.toml" },
   pipelines: { repo: "infra-config", path: "config/pipelines.toml" },
   org: { repo: "infra-config", path: "config/org.toml" },
+  kinds: { repo: "infra-config", path: "config/kinds.toml" },
 });
 
 /** Where GitHub looks for CODEOWNERS, in its order. */
@@ -43,7 +44,8 @@ const CODEOWNERS_PATHS = [".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"]
  *   rulesetNote?: string,
  *   notes: string[],
  * }} RepoPolicy
- * @typedef {{ ok: true, org: string, ruleset: string, read: { file: string, url: string }[], repos: RepoPolicy[] }
+ * @typedef {{ name: string, capabilities: string[] }} Kind
+ * @typedef {{ ok: true, org: string, ruleset: string, read: { file: string, url: string }[], repos: RepoPolicy[], kinds: Kind[] }
  *   | { ok: false, error: string }} Policies
  */
 
@@ -256,5 +258,7 @@ export async function readPolicies() {
     ruleset,
     read: Object.values(SOURCES).map((s) => ({ file: `${s.repo}/${s.path}`, url: `https://github.com/${POLICY_ORG}/${s.repo}/blob/main/${s.path}` })),
     repos,
+    kinds: list(parsed.kinds?.kind).filter((k) => typeof k?.name === "string" && isName(k.name))
+      .map((k) => ({ name: k.name, capabilities: list(k.capabilities).map(String) })),
   };
 }
