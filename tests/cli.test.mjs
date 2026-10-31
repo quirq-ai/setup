@@ -252,6 +252,7 @@ test("server: single-use key, session cookie, host, origin, body size and static
     handlers: {
       state: async () => ({ hello: "world" }),
       repos: async (org) => ({ org }),
+      policies: async () => ({ ok: true, repos: [] }),
       submit: async (b) =>
         submitted.length ? { ok: false, status: 409, error: "already answered" } : (submitted.push(b), { ok: true }),
       machine: {

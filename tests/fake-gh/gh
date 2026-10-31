@@ -3,11 +3,13 @@
 // It never touches the network. Any call it does not know fails the way gh does on a 404.
 const args = process.argv.slice(2);
 if (args[0] === "--version") { console.log("gh version 2.89.0 (fake)"); process.exit(0); }
-if (args[0] !== "api" || args[1] !== "--hostname" || args[2] !== "github.com" || args[3] !== "--method" || args[4] !== "GET") {
-  console.error(`fake gh: only "api --hostname github.com --method GET" calls are allowed, got: ${args.join(" ")}`);
+// The only writes it takes are step 3's (cli/gh.mjs ghWrite): a POST with its JSON body on stdin.
+const post = args[4] === "POST" && args.at(-2) === "--input" && args.at(-1) === "-";
+if (args[0] !== "api" || args[1] !== "--hostname" || args[2] !== "github.com" || args[3] !== "--method" || (args[4] !== "GET" && !post)) {
+  console.error(`fake gh: only "api --hostname github.com --method GET" calls and step 3's POSTs are allowed, got: ${args.join(" ")}`);
   process.exit(9);
 }
-const path = args[args.length - 1];
+const path = post ? args[args.length - 3] : args[args.length - 1];
 // FAKE_GH_LOG names a file that gets one line per path asked for, so a test can show what was read.
 if (process.env.FAKE_GH_LOG) process.getBuiltinModule("node:fs").appendFileSync(process.env.FAKE_GH_LOG, `${path}\n`);
 const b64 = (o) => Buffer.from(JSON.stringify(o)).toString("base64");
@@ -47,6 +49,27 @@ const routes = {
   // An old repo past the 100 the form lists: only a direct GET finds it.
   "repos/acme-labs/old-archive-2019": { name: "old-archive-2019" },
 };
+// FAKE_GH_QUIRQ: the login is also a member of quirq-ai, so the form offers step 3 (its repo policies).
+const text = (t) => ({ encoding: "base64", content: Buffer.from(t).toString("base64") });
+// The files step 3 reads, shared with the local repos its writes clone (tests/fixtures/quirq/remotes.mjs).
+const fixture = (f) => process.getBuiltinModule("node:fs").readFileSync(new URL(`../fixtures/quirq/${f}`, import.meta.url), "utf8");
+if (process.env.FAKE_GH_QUIRQ) {
+  routes["user/memberships/orgs?state=active&per_page=100&page=1"].push({ role: "member", organization: { login: "quirq-ai" } });
+  Object.assign(routes, {
+    "repos/quirq-ai/gate/contents/settings/github.toml?ref=main": text(fixture("gate/settings/github.toml")),
+    "repos/quirq-ai/infra-config/contents/config/repos.toml?ref=main": text(fixture("infra-config/config/repos.toml")),
+    "repos/quirq-ai/infra-config/contents/config/pipelines.toml?ref=main": text(fixture("infra-config/config/pipelines.toml")),
+    "repos/quirq-ai/infra-config/contents/config/org.toml?ref=main": text(fixture("infra-config/config/org.toml")),
+    "repos/quirq-ai/infra-config/contents/config/kinds.toml?ref=main": text(fixture("infra-config/config/kinds.toml")),
+    // The repos themselves, for their default branch; cli is registered but not there (404).
+    "repos/quirq-ai/web": repo("web"),
+    "repos/quirq-ai/gate": repo("gate"),
+    "repos/quirq-ai/web/rulesets?includes_parents=true&per_page=100": [{ id: 1, name: "qq-main", enforcement: "active" }],
+    "repos/quirq-ai/web/contents/.github/CODEOWNERS?ref=main": text("* @sam-example\n"),
+    "repos/quirq-ai/gate/rulesets?includes_parents=true&per_page=100": [],
+    "repos/quirq-ai/cli/rulesets?includes_parents=true&per_page=100": [],
+  });
+}
 // FAKE_GH_NO_ORGS: a login that owns no org (it is only a member of big-co).
 if (process.env.FAKE_GH_NO_ORGS) routes["user/memberships/orgs?state=active&per_page=100&page=1"].splice(0, 1);
 // FAKE_GH_NO_LOGIN: gh is installed but not logged in.
@@ -61,5 +84,28 @@ if (args.includes("--include") && path === "user") {
 // FAKE_GH_SLOW names one path that answers after 3 seconds, as a slow GitHub would.
 if (process.env.FAKE_GH_SLOW === path) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 3000);
 if (path in routes) { process.stdout.write(JSON.stringify(routes[path])); process.exit(0); }
+// Step 3's writes (FAKE_GH_QUIRQ with FAKE_GH_REMOTES, the local repos step 3 clones): each POST is
+// logged with its body as `POST <path> <json>`, and main's head comes from the local repo.
+if (process.env.FAKE_GH_QUIRQ && process.env.FAKE_GH_REMOTES) {
+  const m = /^repos\/quirq-ai\/([^/?]+)(\/.*)?$/.exec(path);
+  const rest = m?.[2] ?? "";
+  const fs = process.getBuiltinModule("node:fs");
+  if (post) {
+    const body = fs.readFileSync(0, "utf8");
+    if (process.env.FAKE_GH_LOG) fs.appendFileSync(process.env.FAKE_GH_LOG, `POST ${path} ${body}\n`);
+    const answer = { "/git/trees": { sha: "tree1" }, "/git/commits": { sha: "commit1" }, "/git/refs": { ref: JSON.parse(body).ref },
+      "/pulls": { html_url: `https://github.com/quirq-ai/${m?.[1]}/pull/101` } }[rest];
+    if (answer) { process.stdout.write(JSON.stringify(answer)); process.exit(0); }
+  } else if (m && fs.existsSync(`${process.env.FAKE_GH_REMOTES}/${m[1]}`)) {
+    const head = () => process.getBuiltinModule("node:child_process").execFileSync("git", ["-C", `${process.env.FAKE_GH_REMOTES}/${m[1]}`, "rev-parse", "main"], { encoding: "utf8" }).trim();
+    const answer = rest === "" ? repo(m[1])
+      : rest === "/pulls?state=open&per_page=100" ? []
+      : rest === "/git/ref/heads/main" ? { object: { sha: head() } }
+      : rest.startsWith("/git/commits/") ? { tree: { sha: "tree0" } }
+      : rest === "/rulesets?per_page=100" ? [{ id: 11, name: "qq-main" }, { id: 12, name: "release-freeze" }]
+      : undefined;
+    if (answer !== undefined) { process.stdout.write(JSON.stringify(answer)); process.exit(0); }
+  }
+}
 console.error(`gh: Not Found (HTTP 404)`);
 process.exit(1);

@@ -17,9 +17,12 @@ refuses one without it. npm 11.14 and later honour the flag, though by default t
 tarball links. npm 10 and npm 11.0 to 11.13 ignore it. Either way it is harmless here, because the package has no
 dependencies.
 
-**The form changes nothing on GitHub.** For your org it shows the plan and stops: it creates no
+**For your org the form changes nothing on GitHub.** It shows the plan and stops: it creates no
 repo, opens no pull request and changes no setting. The version that carries the plan out comes
-next, after review. On your own machine, its first step installs, updates or removes qq and xo:
+next, after review. The one exception is step 3, for members of quirq-ai: it opens pull requests
+in quirq-ai repos, one each time you press Open on a plan you have read (below).
+
+On your own machine, its first step installs, updates or removes qq and xo:
 it shows the exact commands for what you pick and runs them when you press Run. The same is in the
 terminal as [`install`](#install-update-or-remove-qq-and-xo).
 
@@ -56,6 +59,44 @@ terminal as [`install`](#install-update-or-remove-qq-and-xo).
    `build` and `typecheck` scripts) or Gatsby site (pnpm with `build` and `test` scripts). Others
    are listed with the reason, including private repos: GitHub offers a merge queue on private repos
    only on Enterprise Cloud, so v0 sets up public repos only.
+   - **The form's third step, repos and policies in quirq-ai** (shown when your gh login is a member of
+   quirq-ai; the terminal steps below are unrelated). It lists every repo gate's `settings/github.toml`,
+   infra-config's `config/repos.toml` or its `config/org.toml` `[[infra_repo]]` names, each with its
+   testing pipelines (`config/pipelines.toml`), its merge rules (approvals, code-owner review,
+   auto-merge, required checks), its release channels, its CODEOWNERS, and whether GitHub has an active
+   `qq-main` ruleset on it ("ruleset on GitHub", "no ruleset on GitHub", or "could not check", never read
+   as missing). It does not compare that ruleset's rules with gate's settings: a merged gate change
+   reaches GitHub only when an org admin runs gate's settings apply. A repo registered in infra-config
+   that gate does not list yet is shown apart, and a repo or CODEOWNERS it cannot read says so rather
+   than "none". The TOML is read by `cli/toml.mjs`, which
+   reads only the subset those files use and refuses anything else rather than reading it half.
+
+   Below the list, **add a product repo, change a repo's merge rules, or take a product out of qq**
+   (`cli/policy-write.mjs`). Planning clones gate, infra-config and the repo anonymously into a
+   scratch folder and runs their own tools there, in a child process with an empty home folder and no
+   token: infra-config's `qqcfg add-repo` or `remove-repo` (the one generator), `qqcfg deliver` for the
+   repo's workflows, and gate's `settings plan` for its golden file, in gate's hashed apply
+   environment (built once per run, so the first plan takes a minute or two and needs Python 3.11 or
+   newer). gate's `settings/github.toml` and `pins.toml` are edited line by line and parsed again to
+   check that nothing else changed. The page shows every pull request as a diff, in order:
+   - **add**: infra-config (the `[[repo]]`, its presubmit and postsubmit builders, the generated
+     files), then, once that is merged, the repo's `qq-*.yml` workflows and gate's `[[repo]]` with its
+     infra-config pin moved to infra-config main and the golden plan regenerated;
+   - **change**: gate's `[[repo]]` values and the golden plan;
+   - **remove**: infra-config, then gate. It says what stays: the repo, its `qq-*.yml` workflows and
+     its rulesets (`qq-main` included, which keeps gating its pull requests), with the `gh api`
+     lines an admin runs to delete the rulesets. qq-setup deletes nothing.
+
+   Open makes one branch (`qq-setup/<op>-<repo>-<commit>`) and one pull request through your gh
+   login, after checking that the base branch has not moved since the plan; it writes only
+   `git/trees`, `git/commits`, `git/refs` for a `qq-setup/` branch and `pulls` in quirq-ai
+   (`ghWrite` in `cli/gh.mjs` refuses anything else). Nothing is merged or applied: you merge each
+   pull request, and once gate's is merged, planning again shows the command an org admin runs to
+   apply gate's settings. A step that needs the one before it merged waits, and planning again picks
+   up where an earlier run stopped. Limits: product repos only (qq's own infra repos are edited, not
+   added or removed), a public repo with a first commit, macOS or Linux, and a new repo's
+   `infra/repo.toml` is printed as a `qqsync init` command, not written. A repo gate also names as a
+   release executor or in an org workflow is refused for removal: that is a gate change made by hand.
 3. **Reads what already guards each picked repo** (merge settings, rulesets and branch
    protection, all with GETs) and prints a warning for anything that would get in qq's way, or
    "no existing protection found".

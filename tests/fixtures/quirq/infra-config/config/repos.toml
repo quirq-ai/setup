@@ -1,0 +1,11 @@
+[[repo]]
+name = "web"
+kinds = ["node-app"]
+channels = ["canary", "stable"]
+[repo.deploy]
+target = "vercel"
+
+[[repo]]
+name = "cli"
+kinds = ["python-package"]
+channels = []
